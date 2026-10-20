@@ -1,0 +1,177 @@
+<!doctype html>
+<!--
+  FoxBait phone console over Bluetooth (2026-10-20).  Open in Bluefy on an
+  iPhone (Safari has no Web Bluetooth), or desktop Chrome/Edge.  Talks to the
+  board's Nordic UART service (main/blecon.h): writes one command line, prints
+  what comes back, a 0x04 byte ends each reply.  The board only advertises
+  after a button press or power-on, until it next sleeps.
+  Needs https (or localhost) -- Web Bluetooth refuses plain http.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FoxBait BLE</title>
+<style>
+:root{--bg:#f3f5f7;--card:#fff;--line:#d7dde3;--dim:#6b7785;--ok:#1d7a46;--bad:#b3261e;--acc:#1f5fbf}
+*{box-sizing:border-box}
+body{margin:0;font:15px/1.4 -apple-system,system-ui,sans-serif;background:var(--bg);color:#1c2733}
+.wrap{max-width:720px;margin:0 auto;padding:10px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:10px}
+.head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.head b{font-size:17px}
+.sp{flex:1}
+#st{font-size:13px;color:var(--dim)}
+#st.ok{color:var(--ok)} #st.bad{color:var(--bad)}
+button{font:600 15px sans-serif;padding:11px 8px;border-radius:8px;border:1px solid var(--line);background:#fbfcfd;color:#1c2733}
+button:disabled{opacity:.4}
+button.pri{background:var(--acc);border-color:var(--acc);color:#fff}
+.grp{font-size:11px;font-weight:600;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;margin:8px 0 6px}
+.btns{display:grid;grid-template-columns:repeat(auto-fit,minmax(104px,1fr));gap:8px}
+.row{display:flex;gap:8px;margin-top:8px}
+input{flex:1;font:15px ui-monospace,Menlo,monospace;padding:10px;border:1px solid var(--line);border-radius:8px;min-width:0}
+pre{margin:0;white-space:pre-wrap;word-break:break-word;font:12px/1.35 ui-monospace,Menlo,monospace;
+    background:#0f1720;color:#d6e2ee;border-radius:8px;padding:10px;min-height:240px;max-height:55vh;overflow:auto}
+.hint{font-size:12px;color:var(--dim);margin-top:6px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <div class="head">
+      <b>FoxBait</b><span id="name"></span><span class="sp"></span>
+      <button id="bconn" class="pri">Connect</button>
+    </div>
+    <div id="st">Press the button on the board first, then Connect.</div>
+    <div class="hint" id="nobt" style="display:none">This browser has no Bluetooth for web pages. On an iPhone open this page in the Bluefy app.</div>
+  </div>
+
+  <div class="card">
+    <div class="grp">read</div>
+    <div class="btns">
+      <button data-c="status">status</button>
+      <button data-c="slot">slot</button>
+      <button data-c="log 20">log</button>
+      <button data-c="cfg">cfg</button>
+    </div>
+    <div class="grp">power settings</div>
+    <div class="btns">
+      <button data-c="profile">show</button>
+      <button data-c="profile bench" data-q="Switch to BENCH? Wakes every 60 s, stays up 10 min. Uses more battery.">BENCH</button>
+      <button data-c="profile field" data-q="Switch to FIELD? Wakes every 5 min, stays up 100 s.">FIELD</button>
+    </div>
+    <div class="grp">machine</div>
+    <div class="btns">
+      <button data-c="door open">open door</button>
+      <button data-c="door close">close door</button>
+      <button data-c="dispense" data-q="Run one dispense cycle?">dispense</button>
+      <button data-c="mode">mode</button>
+    </div>
+    <div class="row">
+      <input id="cmd" placeholder="any console command, e.g. cfg sleep_default_s 300" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="send">
+      <button id="bsend">Send</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <pre id="out"></pre>
+    <div class="row"><button id="bclr">Clear</button><span class="sp"></span></div>
+  </div>
+</div>
+<script>
+var NUS = "6e400001-b5a3-f393-e0a9-e50e24dcca9e",
+    RX  = "6e400002-b5a3-f393-e0a9-e50e24dcca9e",
+    TX  = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
+var dev = null, rx = null, busy = false, queue = [], acc = "";
+var $ = function(i){ return document.getElementById(i); };
+var dec = new TextDecoder(), enc = new TextEncoder();
+
+function st(t, cls){ var e = $("st"); e.textContent = t; e.className = cls || ""; }
+function out(t){ var o = $("out"); o.textContent += t; o.scrollTop = o.scrollHeight; }
+function setEnabled(on){
+  var bs = document.querySelectorAll("[data-c]");
+  for (var i = 0; i < bs.length; i++) bs[i].disabled = !on;
+  $("bsend").disabled = !on;
+}
+
+function onNotify(ev){
+  var v = new Uint8Array(ev.target.value.buffer);
+  var end = v.indexOf(4);
+  var part = end >= 0 ? v.slice(0, end) : v;
+  acc += dec.decode(part, {stream: end < 0});
+  if (end < 0) return;
+  out(acc); acc = "";
+  if (/locked -- send: pin/.test($("out").textContent.slice(-80))) askPin();
+  busy = false; next();
+}
+
+function askPin(){
+  var p = prompt("Service PIN for this board");
+  if (p) queue.unshift("pin " + p.replace(/\D/g, ""));
+}
+
+function next(){
+  if (busy || !rx || !queue.length) return;
+  var line = queue.shift().slice(0, 180);
+  busy = true;
+  out("\n> " + line + "\n");
+  rx.writeValueWithResponse(enc.encode(line)).catch(function(e){
+    busy = false; out("  (send failed: " + e.message + ")\n");
+  });
+}
+
+function send(line){
+  line = line.trim();
+  if (!line) return;
+  queue.push(line); next();
+}
+
+function disconnected(){
+  rx = null; busy = false; queue = [];
+  setEnabled(false);
+  $("bconn").textContent = "Connect";
+  st("Disconnected. The board drops Bluetooth when it goes to sleep -- press its button, then Connect.", "bad");
+}
+
+async function connect(){
+  if (dev && dev.gatt.connected){ dev.gatt.disconnect(); return; }
+  try {
+    st("Looking for boards…");
+    if (!dev) {
+      dev = await navigator.bluetooth.requestDevice({
+        filters: [{namePrefix: "FBT-"}], optionalServices: [NUS]});
+      dev.addEventListener("gattserverdisconnected", disconnected);
+    }
+    st("Connecting to " + dev.name + "…");
+    var srv = await dev.gatt.connect();
+    var svc = await srv.getPrimaryService(NUS);
+    rx = await svc.getCharacteristic(RX);
+    var tx = await svc.getCharacteristic(TX);
+    await tx.startNotifications();
+    tx.addEventListener("characteristicvaluechanged", onNotify);
+    $("name").textContent = dev.name;
+    $("bconn").textContent = "Disconnect";
+    st("Connected to " + dev.name + ".", "ok");
+    setEnabled(true);
+    send("status");
+  } catch (e) {
+    st("Could not connect: " + e.message, "bad");
+    if (dev && !dev.gatt.connected) dev = null;
+  }
+}
+
+$("bconn").onclick = connect;
+$("bsend").onclick = function(){ send($("cmd").value); $("cmd").value = ""; };
+$("cmd").addEventListener("keydown", function(e){ if (e.key === "Enter") $("bsend").onclick(); });
+$("bclr").onclick = function(){ $("out").textContent = ""; };
+document.addEventListener("click", function(e){
+  var b = e.target.closest("[data-c]");
+  if (!b || b.disabled) return;
+  if (b.dataset.q && !confirm(b.dataset.q)) return;
+  send(b.dataset.c);
+});
+setEnabled(false);
+if (!navigator.bluetooth) { $("nobt").style.display = ""; $("bconn").disabled = true; }
+</script>
+</body>
+</html>
