@@ -59,6 +59,13 @@ svg{width:100%;height:auto;display:block}
 .stale{opacity:.4}
 #banner{display:none;background:#fff3cd;border:1px solid #e6c07a;border-radius:9px;
         padding:9px 11px;margin-bottom:10px;font-size:13px}
+/* Clock not set (Pita 2026-10-21: 「無set 影響都大」): the door stays open
+   and the board wakes every few minutes all day, so it gets the loudest box
+   on the page and its own button. */
+#clkbanner{display:none;background:#fde2e1;border:2px solid #c0392b;color:#7a1d14;
+           border-radius:9px;padding:10px 12px;margin-bottom:10px;font-size:14px}
+#clkbanner b{display:block;font-size:17px;margin-bottom:3px}
+#clkbanner button{margin-top:8px;width:100%}
 .foot{font-size:11px;color:var(--dim);text-align:center;padding:4px 0 10px}
 @keyframes spin{to{transform:translateX(-30px)}}
 #augerspin{animation:spin 1.1s linear infinite;animation-play-state:paused}
@@ -193,6 +200,12 @@ body.stale > *:not(#ble_bar):not(#ble_hint):not(script):not(style){opacity:.4}
   <span id="p_mode" class="pill off">--</span>
   <span class="sp"></span>
   <span id="p_link" class="pill off">connecting</span>
+</div>
+
+<div id="clkbanner">
+  <b id="clkb_t">CLOCK NOT SET</b>
+  <span id="clkb_d"></span>
+  <button id="clkb_set" type="button" class="warn">Set the clock to this phone's time</button>
 </div>
 
 <div id="banner"></div>
@@ -984,6 +997,27 @@ function render(s){
         a.rtc_ok === false ? "not usable -- the schedule cannot run"
       : a.clock            ? ""
                            : "busy";
+
+  /* rtc_state says WHICH: never set / module silent / nonsense.  "" = the
+     lock was busy this poll -- keep whatever the last poll showed rather than
+     flashing the box off for a dispense.  Absent = older firmware: fall back
+     to rtc_ok alone. */
+  var cst = a.rtc_state;
+  if (cst !== ""){
+    var bad = (cst === undefined) ? (a.rtc_ok === false) : (cst !== "ok");
+    $("clkbanner").style.display = bad ? "block" : "none";
+    if (bad){
+      var missing = (cst === "missing");
+      var every = a.next_sleep_s ? Math.round(a.next_sleep_s / 60) : 0;
+      $("clkb_t").textContent = missing ? "NO CLOCK MODULE"
+                              : cst === "bad" ? "CLOCK READS NONSENSE" : "CLOCK NOT SET";
+      $("clkb_d").textContent =
+          (missing ? "Nothing answers on J10 -- check the clock module.  " : "")
+        + "Until the clock is set, the door stays OPEN and the board wakes"
+        + (every ? " every " + every + " min" : "") + " all day, which costs battery.";
+      $("clkb_set").style.display = missing ? "none" : "";
+    }
+  }
   /* WHICH sleep, not just when.  "sleep in 60 s" was the only thing this said,
      and in LINK mode it is a lie in the useful direction: the board is holding
      a BLE link up and light-sleeping between connection events, and will not
@@ -1494,6 +1528,18 @@ $("btn_clk_now").addEventListener("click", function(){
   say("filled in from this device");
 });
 
+function setClockDigits(t){
+  say("setting the clock \u2026");
+  fetch("/api/do?a=rtc_set&t=" + t, {cache:"no-store"})
+    .then(function(r){ return r.json(); })
+    .then(function(j){ say((j.ok ? "\u2713 " : "\u2717 ") + (j.msg || "")); if (j.ok){ clkTouched = false; poll(); } })
+    .catch(function(){ say("\u2717 the board did not answer"); });
+}
+
+$("clkb_set").addEventListener("click", function(){
+  setClockDigits(localStamp(new Date()).replace(/\D/g, ""));
+});
+
 $("btn_clk_set").addEventListener("click", function(){
   var v = $("clk_in").value;
   /* Strip to digits: httpd_query_key_value() on the board does not URL-decode,
@@ -1502,11 +1548,7 @@ $("btn_clk_set").addEventListener("click", function(){
      the firmware accepts both. */
   var t = v.replace(/\D/g, "");
   if (t.length !== 12 && t.length !== 14){ say("\u2717 pick a date and time first"); return; }
-  say("setting the clock \u2026");
-  fetch("/api/do?a=rtc_set&t=" + t, {cache:"no-store"})
-    .then(function(r){ return r.json(); })
-    .then(function(j){ say((j.ok ? "\u2713 " : "\u2717 ") + (j.msg || "")); if (j.ok){ clkTouched = false; poll(); } })
-    .catch(function(){ say("\u2717 the board did not answer"); });
+  setClockDigits(t);
 });
 
 setIris(0, false);
