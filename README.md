@@ -1,6 +1,6 @@
 # FoxBait BLE console
 
-Phone page for the FoxBait board's Bluetooth console (Nordic UART service).
+Phone pages for the FoxBait board over Bluetooth (Nordic UART service): `index.html` is the board's own control page (built by `tools/ble_console/build_ble_ui.py`), `console.html` a plain command console.
 On an iPhone open https://pitapun.github.io/foxbait-ble/ in the **Bluefy** app
 (Safari has no Web Bluetooth). Press the button on the board first, then Connect.
 

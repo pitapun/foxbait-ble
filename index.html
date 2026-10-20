@@ -1,177 +1,1512 @@
 <!doctype html>
-<!--
-  FoxBait phone console over Bluetooth (2026-10-20).  Open in Bluefy on an
-  iPhone (Safari has no Web Bluetooth), or desktop Chrome/Edge.  Talks to the
-  board's Nordic UART service (main/blecon.h): writes one command line, prints
-  what comes back, a 0x04 byte ends each reply.  The board only advertises
-  after a button press or power-on, until it next sleeps.
-  Needs https (or localhost) -- Web Bluetooth refuses plain http.
--->
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>FoxBait BLE</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>FoxBait Rev S (Bluetooth)</title>
 <style>
-:root{--bg:#f3f5f7;--card:#fff;--line:#d7dde3;--dim:#6b7785;--ok:#1d7a46;--bad:#b3261e;--acc:#1f5fbf}
+/* Light on purpose: this is read on a phone, outdoors, in daylight. */
+:root{
+  --bg:#f2f4f7; --card:#fff; --line:#d8dee6; --ink:#141a20; --dim:#5c6b7a;
+  --ok:#1a7f37; --bad:#c0392b; --warn:#b7791f; --idle:#8b98a5; --hot:#e8590c;
+}
 *{box-sizing:border-box}
-body{margin:0;font:15px/1.4 -apple-system,system-ui,sans-serif;background:var(--bg);color:#1c2733}
-.wrap{max-width:720px;margin:0 auto;padding:10px}
+html,body{margin:0;padding:0}
+body{
+  background:var(--bg);color:var(--ink);
+  font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  padding:10px 10px calc(10px + env(safe-area-inset-bottom));max-width:760px;margin:0 auto;
+  -webkit-text-size-adjust:100%;
+}
+h1{font-size:17px;margin:0;letter-spacing:.2px}
+.head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+.head .sp{flex:1}
 .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:10px}
-.head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.head b{font-size:17px}
-.sp{flex:1}
-#st{font-size:13px;color:var(--dim)}
-#st.ok{color:var(--ok)} #st.bad{color:var(--bad)}
-button{font:600 15px sans-serif;padding:11px 8px;border-radius:8px;border:1px solid var(--line);background:#fbfcfd;color:#1c2733}
-button:disabled{opacity:.4}
-button.pri{background:var(--acc);border-color:var(--acc);color:#fff}
-.grp{font-size:11px;font-weight:600;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;margin:8px 0 6px}
-.btns{display:grid;grid-template-columns:repeat(auto-fit,minmax(104px,1fr));gap:8px}
-.row{display:flex;gap:8px;margin-top:8px}
-input{flex:1;font:15px ui-monospace,Menlo,monospace;padding:10px;border:1px solid var(--line);border-radius:8px;min-width:0}
-pre{margin:0;white-space:pre-wrap;word-break:break-word;font:12px/1.35 ui-monospace,Menlo,monospace;
-    background:#0f1720;color:#d6e2ee;border-radius:8px;padding:10px;min-height:240px;max-height:55vh;overflow:auto}
-.hint{font-size:12px;color:var(--dim);margin-top:6px}
+.pill{display:inline-block;padding:2px 9px;border-radius:999px;font-size:12px;font-weight:600;
+      color:#fff;background:var(--idle);white-space:nowrap}
+.pill.ok{background:var(--ok)} .pill.bad{background:var(--bad)}
+.pill.warn{background:var(--warn)} .pill.hot{background:var(--hot)}
+.pill.off{background:#c3cbd4;color:#39414a}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px}
+.kv{border:1px solid var(--line);border-radius:8px;padding:7px 9px;background:#fbfcfd}
+.kv b{display:block;font-size:11px;font-weight:600;color:var(--dim);text-transform:uppercase;letter-spacing:.5px}
+.kv span{font-size:19px;font-weight:600;font-variant-numeric:tabular-nums}
+.kv small{display:block;font-size:11px;color:var(--dim);margin-top:1px}
+.btns{display:grid;grid-template-columns:repeat(auto-fit,minmax(112px,1fr));gap:8px}
+.btns+.grp{margin-top:14px}
+.grp{font-size:11px;font-weight:600;color:var(--dim);text-transform:uppercase;
+     letter-spacing:.5px;margin:0 0 6px}
+button{font:inherit;font-weight:600;padding:12px 8px;border-radius:9px;border:1px solid var(--line);
+       background:#fff;color:var(--ink);cursor:pointer;-webkit-tap-highlight-color:transparent}
+button:active{background:#e9edf2}
+button.warn{border-color:#e6c07a;background:#fff8ea}
+#ask{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);
+     align-items:center;justify-content:center;padding:18px;z-index:50}
+#ask_card{background:var(--card,#fff);border-radius:14px;padding:18px;
+          max-width:420px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,.3)}
+#ask_text{font-size:15px;line-height:1.45;white-space:pre-wrap;word-break:break-word}
+#ask_row{display:flex;gap:8px;margin-top:16px}
+#ask_row button{flex:1}
+button:disabled{opacity:.45}
+#msg{min-height:19px;font-size:13px;color:var(--dim);margin:6px 2px 0;word-break:break-word}
+#svgwrap,#vsvgwrap{width:100%;overflow:hidden}
+svg{width:100%;height:auto;display:block}
+.lbl{font:600 22px/1 sans-serif;fill:#41505f}
+.lbl.sm{font-size:18px;font-weight:500;fill:#69788a}
+.vlabel{font:600 14px/1 sans-serif;fill:#41505f}
+.vlabel.sm{font-size:12px;font-weight:500;fill:#69788a}
+.rule{stroke:#c8d1da;stroke-width:1;stroke-dasharray:3 3}
+.stale{opacity:.4}
+#banner{display:none;background:#fff3cd;border:1px solid #e6c07a;border-radius:9px;
+        padding:9px 11px;margin-bottom:10px;font-size:13px}
+.foot{font-size:11px;color:var(--dim);text-align:center;padding:4px 0 10px}
+@keyframes spin{to{transform:translateX(-30px)}}
+#augerspin{animation:spin 1.1s linear infinite;animation-play-state:paused}
+#augerspin.run{animation-play-state:running}
 </style>
 </head>
 <body>
-<div class="wrap">
-  <div class="card">
-    <div class="head">
-      <b>FoxBait</b><span id="name"></span><span class="sp"></span>
-      <button id="bconn" class="pri">Connect</button>
-    </div>
-    <div id="st">Press the button on the board first, then Connect.</div>
-    <div class="hint" id="nobt" style="display:none">This browser has no Bluetooth for web pages. On an iPhone open this page in the Bluefy app.</div>
-  </div>
-
-  <div class="card">
-    <div class="grp">read</div>
-    <div class="btns">
-      <button data-c="status">status</button>
-      <button data-c="slot">slot</button>
-      <button data-c="log 20">log</button>
-      <button data-c="cfg">cfg</button>
-    </div>
-    <div class="grp">power settings</div>
-    <div class="btns">
-      <button data-c="profile">show</button>
-      <button data-c="profile bench" data-q="Switch to BENCH? Wakes every 60 s, stays up 10 min. Uses more battery.">BENCH</button>
-      <button data-c="profile field" data-q="Switch to FIELD? Wakes every 5 min, stays up 100 s.">FIELD</button>
-    </div>
-    <div class="grp">machine</div>
-    <div class="btns">
-      <button data-c="door open">open door</button>
-      <button data-c="door close">close door</button>
-      <button data-c="dispense" data-q="Run one dispense cycle?">dispense</button>
-      <button data-c="mode">mode</button>
-    </div>
-    <div class="row">
-      <input id="cmd" placeholder="any console command, e.g. cfg sleep_default_s 300" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="send">
-      <button id="bsend">Send</button>
-    </div>
-  </div>
-
-  <div class="card">
-    <pre id="out"></pre>
-    <div class="row"><button id="bclr">Clear</button><span class="sp"></span></div>
-  </div>
+<!-- BLE transport for the board's own page (inserted by build_ble_ui.py right
+     after <body>).  The page keeps calling fetch("/api/..."); this sends each
+     one to the board over the Nordic UART service as "@/api/..." and hands
+     back the JSON the board answers with, so every card and button works the
+     same as on the Wi-Fi AP.  One request at a time; a /api/state poll that
+     arrives while one is already waiting shares its answer. -->
+<div id="ble_bar" style="position:sticky;top:0;z-index:50;display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+     padding:8px 12px;background:#1f2a36;color:#fff;font:600 14px -apple-system,system-ui,sans-serif">
+  <span id="ble_txt">Bluetooth: not connected</span>
+  <span style="flex:1"></span>
+  <a href="console.html" style="color:#9cc3ff;font-weight:500;font-size:13px">console</a>
+  <button id="ble_btn" style="font:600 14px sans-serif;padding:8px 14px;border-radius:8px;border:0;background:#2f7de1;color:#fff">Connect</button>
+</div>
+<div id="ble_hint" style="display:none;padding:8px 12px;background:#fff4d6;font:13px sans-serif;color:#5a4300">
+  This browser has no Bluetooth for web pages. On an iPhone open this page in the Bluefy app.
 </div>
 <script>
-var NUS = "6e400001-b5a3-f393-e0a9-e50e24dcca9e",
-    RX  = "6e400002-b5a3-f393-e0a9-e50e24dcca9e",
-    TX  = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
-var dev = null, rx = null, busy = false, queue = [], acc = "";
-var $ = function(i){ return document.getElementById(i); };
-var dec = new TextDecoder(), enc = new TextEncoder();
+(function(){
+  var NUS = "6e400001-b5a3-f393-e0a9-e50e24dcca9e",
+      RX  = "6e400002-b5a3-f393-e0a9-e50e24dcca9e",
+      TX  = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
+  var dev = null, rx = null, q = [], cur = null, parts = [], timer = null, stateP = null;
+  var enc = new TextEncoder(), dec = new TextDecoder();
+  var realFetch = window.fetch ? window.fetch.bind(window) : null;
 
-function st(t, cls){ var e = $("st"); e.textContent = t; e.className = cls || ""; }
-function out(t){ var o = $("out"); o.textContent += t; o.scrollTop = o.scrollHeight; }
-function setEnabled(on){
-  var bs = document.querySelectorAll("[data-c]");
-  for (var i = 0; i < bs.length; i++) bs[i].disabled = !on;
-  $("bsend").disabled = !on;
-}
+  function bar(t, bad){
+    document.getElementById("ble_txt").textContent = t;
+    document.getElementById("ble_bar").style.background = bad ? "#8a2420" : (rx ? "#1d6b40" : "#1f2a36");
+  }
+  function resp(text){
+    return { ok: true, status: 200,
+             text: function(){ return Promise.resolve(text); },
+             json: function(){ return Promise.resolve(JSON.parse(text)); } };
+  }
+  function finish(err, text){
+    clearTimeout(timer);
+    var c = cur; cur = null;
+    if (c) { if (err) c.rej(err); else c.res(resp(text)); }
+    pump();
+  }
+  function pump(){
+    if (cur || !rx || !q.length) return;
+    cur = q.shift(); parts = [];
+    timer = setTimeout(function(){ finish(new Error("no answer over Bluetooth")); }, 15000);
+    rx.writeValueWithResponse(enc.encode("@" + cur.url)).catch(function(e){ finish(e); });
+  }
+  function onNotify(ev){
+    var v = new Uint8Array(ev.target.value.buffer.slice(0));
+    var end = v.indexOf(4);
+    parts.push(end >= 0 ? v.slice(0, end) : v);
+    if (end < 0) return;
+    var n = 0, i; for (i = 0; i < parts.length; i++) n += parts[i].length;
+    var all = new Uint8Array(n), o = 0;
+    for (i = 0; i < parts.length; i++) { all.set(parts[i], o); o += parts[i].length; }
+    finish(null, dec.decode(all));
+  }
 
-function onNotify(ev){
-  var v = new Uint8Array(ev.target.value.buffer);
-  var end = v.indexOf(4);
-  var part = end >= 0 ? v.slice(0, end) : v;
-  acc += dec.decode(part, {stream: end < 0});
-  if (end < 0) return;
-  out(acc); acc = "";
-  if (/locked -- send: pin/.test($("out").textContent.slice(-80))) askPin();
-  busy = false; next();
-}
-
-function askPin(){
-  var p = prompt("Service PIN for this board");
-  if (p) queue.unshift("pin " + p.replace(/\D/g, ""));
-}
-
-function next(){
-  if (busy || !rx || !queue.length) return;
-  var line = queue.shift().slice(0, 180);
-  busy = true;
-  out("\n> " + line + "\n");
-  rx.writeValueWithResponse(enc.encode(line)).catch(function(e){
-    busy = false; out("  (send failed: " + e.message + ")\n");
-  });
-}
-
-function send(line){
-  line = line.trim();
-  if (!line) return;
-  queue.push(line); next();
-}
-
-function disconnected(){
-  rx = null; busy = false; queue = [];
-  setEnabled(false);
-  $("bconn").textContent = "Connect";
-  st("Disconnected. The board drops Bluetooth when it goes to sleep -- press its button, then Connect.", "bad");
-}
-
-async function connect(){
-  if (dev && dev.gatt.connected){ dev.gatt.disconnect(); return; }
-  try {
-    st("Looking for boards…");
-    if (!dev) {
-      dev = await navigator.bluetooth.requestDevice({
-        filters: [{namePrefix: "FBT-"}], optionalServices: [NUS]});
-      dev.addEventListener("gattserverdisconnected", disconnected);
+  window.fetch = function(url, opts){
+    if (typeof url !== "string" || url.indexOf("/api/") !== 0)
+      return realFetch ? realFetch(url, opts) : Promise.reject(new Error("no fetch"));
+    if (!rx) return Promise.reject(new Error("Bluetooth not connected"));
+    if (url === "/api/state" && stateP) return stateP;
+    var p = new Promise(function(res, rej){ q.push({url: url, res: res, rej: rej}); pump(); });
+    if (url === "/api/state") {
+      stateP = p;
+      var clr = function(){ stateP = null; };
+      p.then(clr, clr);
     }
-    st("Connecting to " + dev.name + "…");
-    var srv = await dev.gatt.connect();
-    var svc = await srv.getPrimaryService(NUS);
-    rx = await svc.getCharacteristic(RX);
-    var tx = await svc.getCharacteristic(TX);
-    await tx.startNotifications();
-    tx.addEventListener("characteristicvaluechanged", onNotify);
-    $("name").textContent = dev.name;
-    $("bconn").textContent = "Disconnect";
-    st("Connected to " + dev.name + ".", "ok");
-    setEnabled(true);
-    send("status");
-  } catch (e) {
-    st("Could not connect: " + e.message, "bad");
-    if (dev && !dev.gatt.connected) dev = null;
+    return p;
+  };
+
+  function dropped(){
+    rx = null;
+    var err = new Error("Bluetooth disconnected");
+    if (cur) finish(err);
+    while (q.length) q.shift().rej(err);
+    document.getElementById("ble_btn").textContent = "Connect";
+    bar("Disconnected -- the board drops Bluetooth when it sleeps. Press its button, then Connect.", true);
+  }
+
+  async function connect(){
+    if (dev && dev.gatt.connected) { dev.gatt.disconnect(); return; }
+    try {
+      bar("Looking for boards…");
+      if (!dev) {
+        dev = await navigator.bluetooth.requestDevice({
+          filters: [{namePrefix: "FBT-"}], optionalServices: [NUS]});
+        dev.addEventListener("gattserverdisconnected", dropped);
+      }
+      bar("Connecting to " + dev.name + "…");
+      var svc = await (await dev.gatt.connect()).getPrimaryService(NUS);
+      var r = await svc.getCharacteristic(RX);
+      var t = await svc.getCharacteristic(TX);
+      await t.startNotifications();
+      t.addEventListener("characteristicvaluechanged", onNotify);
+      rx = r;
+      document.getElementById("ble_btn").textContent = "Disconnect";
+      bar("Bluetooth: " + dev.name);
+      if (typeof poll === "function") poll();
+    } catch (e) {
+      bar("Could not connect: " + e.message, true);
+      if (dev && !dev.gatt.connected) dev = null;
+    }
+  }
+
+  document.getElementById("ble_btn").onclick = connect;
+  if (!navigator.bluetooth) {
+    document.getElementById("ble_hint").style.display = "";
+    document.getElementById("ble_btn").disabled = true;
+  }
+})();
+</script>
+
+
+<div class="head">
+  <h1>FoxBait&nbsp;Rev&nbsp;S</h1>
+  <span id="p_status" class="pill">--</span>
+  <span id="p_mode" class="pill off">--</span>
+  <span class="sp"></span>
+  <span id="p_link" class="pill off">connecting</span>
+</div>
+
+<div id="banner"></div>
+
+<div class="card" id="svgwrap">
+<!--
+  THE AUGER MACHINE, and only that one.  renderMachine() hides this whole card
+  on any other.  The vertical machine has its own schematic immediately after
+  this card, rather than making one picture pretend to be both mechanisms.
+
+  Side view, laid out the way the machine actually is: the iris faceplate on
+  the left, the elbow and the Y branch, then the main tube with the auger in
+  it, and the head cap at the right with the board and pack behind it.
+  Everything that can move is driven from the live state, so "which part is
+  working" is answered by looking, not by reading a field name.
+
+  That last sentence is exactly why it cannot be shown on the vertical machine.
+  It has no iris, no auger, no horizontal tube; the parts this drawing animates
+  from live state -- #iris, #augerspin, #augerfront -- are parts that board does
+  not have. A picture that moves in time with the machine while showing a
+  different machine is worse than no picture: it answers "which part is
+  working" confidently and wrongly. Reported from the board 2026-09-09.
+-->
+<svg viewBox="60 30 670 510" role="img" aria-label="FoxBait">
+  <defs>
+    <clipPath id="tubeclip"><rect x="446" y="78" width="232" height="144"/></clipPath>
+    <linearGradient id="tube" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fbfcfd"/><stop offset=".22" stop-color="#f2f5f8"/>
+      <stop offset=".55" stop-color="#dbe2e9"/><stop offset="1" stop-color="#adb9c5"/>
+    </linearGradient>
+    <linearGradient id="chute" gradientUnits="userSpaceOnUse"
+        x1="354.4" y1="329.6" x2="277.8" y2="271.8">
+      <stop offset="0" stop-color="#fbfcfd"/><stop offset=".3" stop-color="#eef2f6"/>
+      <stop offset="1" stop-color="#b3bec9"/>
+    </linearGradient>
+    <linearGradient id="face" x1=".2" y1="0" x2=".8" y2="1">
+      <stop offset="0" stop-color="#f4f7f9"/><stop offset=".6" stop-color="#dfe6ec"/>
+      <stop offset="1" stop-color="#bcc7d1"/>
+    </linearGradient>
+  </defs>
+
+  <!-- chute first: the tube closes over its mouth and the faceplate over its
+       far end, so the three read as one body.  Constant radius, gentle bend --
+       built by offsetting one centre curve, which is what keeps it a cylinder
+       instead of the funnel it used to be. -->
+  <path d="M428.4,170.4 L426.8,176.0 L425.2,181.6 L423.5,187.3 L421.8,193.0 L419.9,198.8 L418.0,204.6 L416.0,210.4 L413.9,216.2 L411.8,222.0 L409.6,227.8 L407.2,233.7 L404.8,239.5 L402.4,245.4 L399.8,251.2 L397.1,257.1 L394.4,262.9 L391.6,268.7 L388.7,274.4 L385.7,280.1 L382.6,285.8 L379.4,291.5 L376.1,297.1 L372.8,302.7 L369.3,308.2 L365.7,313.7 L362.1,319.0 L358.3,324.4 L354.4,329.6 L350.4,334.8 L346.3,339.9 L342.1,344.9 L337.8,349.8 L333.3,354.6 L328.7,359.3 L324.0,363.8 L319.1,368.3 L314.1,372.6 L309.0,376.8 L303.7,380.8 L298.2,384.7 L292.6,388.4 L286.9,391.9 L281.0,395.2 L274.9,398.3 L268.7,401.1 L262.3,403.8 L255.8,406.1 L249.1,408.2 L242.3,410.0 L235.4,411.6 L228.3,412.8 L221.2,413.7 L213.9,414.2 L206.6,414.4 L199.2,414.3 L191.8,413.8 L200.2,318.2 L203.2,318.4 L206.0,318.4 L208.8,318.3 L211.6,318.1 L214.3,317.8 L217.0,317.3 L219.7,316.8 L222.3,316.0 L225.0,315.2 L227.6,314.2 L230.3,313.1 L233.0,311.9 L235.7,310.5 L238.5,309.0 L241.2,307.3 L244.0,305.4 L246.8,303.5 L249.6,301.3 L252.5,299.0 L255.3,296.6 L258.2,294.0 L261.0,291.2 L263.8,288.3 L266.7,285.3 L269.5,282.1 L272.3,278.8 L275.0,275.3 L277.8,271.8 L280.5,268.1 L283.2,264.3 L285.9,260.4 L288.5,256.4 L291.1,252.3 L293.6,248.1 L296.1,243.8 L298.5,239.5 L300.9,235.0 L303.3,230.5 L305.6,226.0 L307.8,221.4 L310.0,216.7 L312.1,212.0 L314.2,207.3 L316.2,202.6 L318.2,197.8 L320.1,193.0 L321.9,188.2 L323.7,183.4 L325.4,178.6 L327.1,173.8 L328.7,169.0 L330.2,164.2 L331.7,159.5 L333.0,154.8 L334.4,150.2 L335.6,145.6 Z"
+        fill="url(#chute)" stroke="#8695a4" stroke-linejoin="round"/>
+  <path d="M407.5,164.8 L406.0,170.2 L404.5,175.6 L402.9,181.1 L401.2,186.6 L399.4,192.1 L397.6,197.6 L395.6,203.2 L393.6,208.8 L391.6,214.4 L389.4,220.0 L387.2,225.6 L384.9,231.2 L382.5,236.8 L380.1,242.4 L377.5,248.0 L374.9,253.5 L372.2,259.1 L369.5,264.5 L366.6,270.0 L363.7,275.4 L360.7,280.8 L357.6,286.1 L354.4,291.3 L351.1,296.5 L347.8,301.7 L344.3,306.7 L340.8,311.7 L337.2,316.6 L333.5,321.4 L329.7,326.1 L325.8,330.8 L321.8,335.3 L317.7,339.7 L313.5,344.0 L309.2,348.1 L304.8,352.2 L300.2,356.0 L295.6,359.8 L290.9,363.4 L286.0,366.8 L281.1,370.1 L276.0,373.2 L270.8,376.1 L265.5,378.8 L260.1,381.3 L254.5,383.6 L248.9,385.7 L243.1,387.5 L237.2,389.1 L231.2,390.4 L225.2,391.4 L219.0,392.2 L212.8,392.6 L206.5,392.8 L200.1,392.7 L193.7,392.3" fill="none" stroke="#ffffff" stroke-width="12"
+        opacity=".45" stroke-linecap="round"/>
+
+  <!-- ============ the tube, as a cylinder ============ -->
+  <ellipse cx="266" cy="150" rx="32" ry="74" fill="url(#tube)" stroke="#8695a4"/>
+  <rect x="266" y="76" width="424" height="148" fill="url(#tube)"/>
+  <ellipse cx="690" cy="150" rx="24" ry="74" fill="#cfd8e0" stroke="#8695a4"/>
+  <ellipse cx="690" cy="150" rx="14" ry="58" fill="#a9b5c1"/>
+  <path d="M266,76 L690,76 M266,224 L690,224" stroke="#8695a4" fill="none"/>
+  <rect x="272" y="92" width="410" height="12" rx="6" fill="#ffffff" opacity=".55"/>
+  <path d="M390,78 A22,72 0 0,0 390,222" fill="none" stroke="#a8b4c0"/>
+  <path d="M446,78 A22,72 0 0,0 446,222" fill="none" stroke="#a8b4c0"/>
+
+  <rect x="288" y="100" width="96" height="100" rx="9" fill="#fbfcfd"
+        stroke="#93a1af" stroke-dasharray="5 4" opacity=".95"/>
+  <rect id="pcb"  x="296" y="110" width="80" height="30" rx="3" fill="#2f6b3f"/>
+  <rect id="pack" x="296" y="150" width="80" height="30" rx="3" fill="#8b98a5"/>
+  <text class="lbl sm" x="320" y="56" text-anchor="middle">board + pack</text>
+
+  <rect id="motorbox" x="404" y="112" width="42" height="76" rx="5"
+        fill="#b3bdc7" stroke="#8695a4"/>
+  <rect x="446" y="140" width="16" height="20" rx="3" fill="#8695a4"/>
+  <text class="lbl sm" x="437" y="56" text-anchor="middle">motor</text>
+
+  <g clip-path="url(#tubeclip)">
+    <g id="augerspin">
+      <rect id="augershaft" x="440" y="143" width="290" height="14" rx="7" fill="#3a4047"/>
+      <g id="augerfront" fill="none" stroke="#22262a" stroke-width="6">
+        <ellipse cx="452" cy="150" rx="17" ry="55" transform="rotate(-9 452 150)"/>
+        <ellipse cx="482" cy="150" rx="17" ry="55" transform="rotate(-9 482 150)"/>
+        <ellipse cx="512" cy="150" rx="17" ry="55" transform="rotate(-9 512 150)"/>
+        <ellipse cx="542" cy="150" rx="17" ry="55" transform="rotate(-9 542 150)"/>
+        <ellipse cx="572" cy="150" rx="17" ry="55" transform="rotate(-9 572 150)"/>
+        <ellipse cx="602" cy="150" rx="17" ry="55" transform="rotate(-9 602 150)"/>
+        <ellipse cx="632" cy="150" rx="17" ry="55" transform="rotate(-9 632 150)"/>
+        <ellipse cx="662" cy="150" rx="17" ry="55" transform="rotate(-9 662 150)"/>
+        <ellipse cx="692" cy="150" rx="17" ry="55" transform="rotate(-9 692 150)"/>
+      </g>
+    </g>
+  </g>
+  <text class="lbl" x="580" y="56" text-anchor="middle">auger</text>
+  <text class="lbl sm" id="t_auger" x="618" y="292" text-anchor="middle">stepper asleep</text>
+
+  <!-- ToF clamped to the pipe, looking down it at the bait -->
+  <line id="beam" x1="387" y1="250" x2="333" y2="287"
+        stroke="#1d3a6b" stroke-width="4" stroke-dasharray="7 5" opacity=".55"/>
+  <g transform="rotate(-65 407 259)">
+    <rect x="382" y="243" width="50" height="32" rx="5" fill="#1d3a6b"/>
+    <circle cx="395" cy="259" r="7" fill="#8fb0e8"/>
+  </g>
+  <text class="lbl sm" x="500" y="240" text-anchor="middle">ToF</text>
+  <text class="lbl sm" id="t_slot" x="500" y="266" text-anchor="middle">--</text>
+
+  <g transform="rotate(-54 320 296)">
+    <rect id="slotbox" x="299" y="283" width="42" height="26" rx="13"
+          fill="#ffffff" stroke="#8695a4"/>
+  </g>
+  <text class="lbl sm" x="378" y="330">bait</text>
+
+  <!-- ============ faceplate: a short cylinder, iris in its face ========= -->
+  <g transform="translate(206,366) rotate(-8) scale(1,0.93) rotate(8) translate(-206,-366)">
+  <circle cx="219" cy="378" r="100" fill="#adb9c5" stroke="#8695a4"/>
+  <circle cx="206" cy="366" r="100" fill="url(#face)" stroke="#8695a4"/>
+  <circle cx="206" cy="366" r="85" fill="none" stroke="#c6d0d9"/>
+  <circle cx="206" cy="274" r="6" fill="#b0bcc7"/>
+  <circle cx="206" cy="458" r="6" fill="#b0bcc7"/>
+  <circle cx="114" cy="366" r="6" fill="#b0bcc7"/>
+  <circle cx="298" cy="366" r="6" fill="#b0bcc7"/>
+  <circle cx="206" cy="366" r="60" fill="#151a1f"/>
+  <path id="iris" d="" fill="#eaeff4" fill-rule="evenodd" stroke="#a6b1bc"/>
+  <g id="seams" stroke="#a6b1bc" stroke-width="2" fill="none"></g>
+  <circle cx="206" cy="366" r="60" fill="none" stroke="#8695a4" stroke-width="3"/>
+  </g>
+  <rect id="servobox" x="318" y="404" width="52" height="30" rx="5"
+        fill="#8b98a5" stroke="#7a8794"/>
+  <text class="lbl sm" x="356" y="396" text-anchor="middle">servo 1</text>
+  <text class="lbl" x="206" y="506" text-anchor="middle">iris (door)</text>
+  <text class="lbl sm" id="t_door" x="206" y="530" text-anchor="middle">--</text>
+</svg>
+</div>
+
+<!--
+  VERTICAL MACHINE ONLY.  This is a schematic, not a traced photograph: it
+  shows only the pieces the firmware actually controls or measures.  In
+  particular, the flap is shown OPEN only after J12 has confirmed the open
+  stop; `door_open` alone is a command, not a measurement.  The orange arrow
+  says a continuous-rotation run is under way, and never implies a position.
+-->
+<div class="card" id="vsvgwrap" style="display:none">
+<svg viewBox="0 0 670 500" role="img" aria-label="FoxBait vertical mechanism">
+  <defs>
+    <linearGradient id="vbody" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f8fafc"/><stop offset=".55" stop-color="#dbe2e9"/>
+      <stop offset="1" stop-color="#aebac6"/>
+    </linearGradient>
+    <marker id="varrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L9,3 L0,6z" fill="#e8590c"/>
+    </marker>
+  </defs>
+
+  <text class="lbl" x="335" y="42" text-anchor="middle">vertical bait mechanism</text>
+  <text class="lbl sm" x="335" y="68" text-anchor="middle">open is confirmed at J12 · shut is a timed run</text>
+
+  <!-- One vertical PVC tube: bait rests on individual trays above the exposed
+       lower door.  This follows the physical layout without inventing hidden
+       gearing. -->
+  <text class="vlabel" x="335" y="103" text-anchor="middle">PVC bait tube</text>
+  <ellipse cx="335" cy="126" rx="152" ry="25" fill="#d7dde3" stroke="#8695a4" stroke-width="3"/>
+  <path d="M183,126 V438 C183,462 487,462 487,438 V126" fill="url(#vbody)"
+        fill-opacity=".48" stroke="#8695a4" stroke-width="3"/>
+  <ellipse cx="335" cy="438" rx="152" ry="25" fill="#b6c1cb" stroke="#8695a4" stroke-width="3"/>
+
+  <!-- A bait and its plate, repeated vertically as in the real feeder. -->
+  <g fill="#edf1f5" stroke="#8d9bab" stroke-width="3">
+    <ellipse cx="335" cy="184" rx="102" ry="18"/><ellipse cx="335" cy="246" rx="102" ry="18"/>
+    <ellipse cx="335" cy="308" rx="102" ry="18"/>
+  </g>
+  <g fill="#b97b42" stroke="#8c5b31" stroke-width="2">
+    <ellipse cx="335" cy="169" rx="23" ry="12"/><ellipse cx="335" cy="231" rx="23" ry="12"/>
+    <ellipse cx="335" cy="293" rx="23" ry="12"/>
+  </g>
+  <text class="vlabel sm" x="211" y="171">one bait / one tray</text>
+
+  <!-- The door is exposed through the lower cut-out, not a second PVC tube.
+       It slides up only after J12 has made at the stop. -->
+  <rect x="266" y="324" width="138" height="101" rx="8" fill="#fff" stroke="#8d9bab" stroke-width="3"/>
+  <path d="M266,324 Q335,339 404,324" fill="none" stroke="#69788a" stroke-width="3"/>
+  <text class="vlabel sm" x="335" y="448" text-anchor="middle">exposed door opening</text>
+  <g id="v_flap" transform="translate(0 0)">
+    <path d="M278,326 V413 Q335,430 392,413 V326 Q335,340 278,326z"
+          fill="#718193" stroke="#41505f" stroke-width="3"/>
+    <path d="M291,347 H379 M291,366 H379 M291,385 H379" stroke="#aebbc7" stroke-width="3"/>
+  </g>
+
+  <!-- J5 drives the exposed panel up its rails. -->
+  <rect id="v_door_servo" x="210" y="349" width="55" height="42" rx="7"
+        fill="#8b98a5" stroke="#69788a" stroke-width="3"/>
+  <circle cx="265" cy="370" r="10" fill="#dce4eb" stroke="#69788a" stroke-width="3"/>
+  <path d="M265,370 H278 M278,370 V324" stroke="#69788a" stroke-width="6" stroke-linecap="round"/>
+  <text class="vlabel sm" x="237" y="407" text-anchor="middle">J5 door</text>
+  <path id="v_motion_arrow" d="M417,409 V323" fill="none" stroke="#e8590c" stroke-width="6"
+        marker-end="url(#varrow)" style="display:none"/>
+  <text class="vlabel sm" id="v_motion_text" x="441" y="413" text-anchor="middle"></text>
+
+  <!-- J12 confirms the fully-raised panel; ToF watches the bait area. -->
+  <path d="M413,250 h25 v42 h-25" fill="#e9eef3" stroke="#69788a" stroke-width="3"/>
+  <path id="v_limit_arm" d="M413,271 h-17" stroke="#69788a" stroke-width="4" stroke-linecap="round"/>
+  <circle id="v_limit" cx="438" cy="271" r="8" fill="#c3cbd4" stroke="#69788a" stroke-width="2"/>
+  <text class="vlabel sm" x="452" y="263">J12</text>
+  <text class="vlabel sm" id="v_limit_text" x="452" y="284">open limit</text>
+  <rect x="438" y="344" width="34" height="55" rx="4" fill="#1d3a6b"/>
+  <circle cx="455" cy="359" r="5" fill="#9fc3f5"/><circle cx="455" cy="382" r="5" fill="#9fc3f5"/>
+  <path d="M438,372 H405" stroke="#1d3a6b" stroke-width="3" stroke-dasharray="5 4"/>
+  <text class="vlabel sm" x="484" y="365">ToF</text>
+
+  <!-- J6 turns the dispensing plate below the door, then returns it home. -->
+  <ellipse cx="335" cy="417" rx="92" ry="17" fill="#d5dde5" stroke="#8695a4" stroke-width="3"/>
+  <rect id="v_bait_servo" x="303" y="452" width="57" height="25" rx="6"
+        fill="#8b98a5" stroke="#69788a" stroke-width="3"/>
+  <g id="v_bait_arm" transform="rotate(0 335 435)">
+    <circle cx="335" cy="435" r="8" fill="#dce4eb" stroke="#69788a" stroke-width="3"/>
+    <path d="M335,435 L372,416" stroke="#69788a" stroke-width="7" stroke-linecap="round"/>
+  </g>
+  <text class="vlabel sm" x="335" y="496" text-anchor="middle" id="v_bait_text">J6 bait plate · home</text>
+</svg>
+</div>
+
+<div class="card">
+  <div class="grid">
+    <div class="kv"><b>pack</b><span id="v_batt">--</span><small id="v_battnote">&nbsp;</small></div>
+    <div class="kv"><b>bait slot</b><span id="v_slot">--</span><small id="v_slotnote">&nbsp;</small></div>
+    <div class="kv"><b>dispensed</b><span id="v_bait">--</span><small id="v_baitnote">&nbsp;</small></div>
+    <div class="kv"><b>door</b><span id="v_door">--</span><small id="v_doornote">&nbsp;</small></div>
+  </div>
+</div>
+
+<div class="card">
+  <div style="display:flex;flex-wrap:wrap;gap:6px">
+    <span id="p_servo" class="pill off">SERVO 5V</span>
+    <span id="p_lcd"   class="pill off">LCD 5V</span>
+    <span id="p_drv"   class="pill off">DRV8825</span>
+    <span id="p_tof"   class="pill off">ToF</span>
+    <span id="p_rtc"   class="pill off">clock</span>
+    <span id="p_sleep" class="pill off">sleep</span>
+    <span id="p_ble"   class="pill off">BLE</span>
+  </div>
+  <!--
+    The sleep pill says what the board is doing; this says what to do about it.
+    Both directions are ONE button whose data-a is rewritten in render(), not
+    two buttons -- "turn it on" and "turn it off" side by side is a pair of
+    which one is always wrong, and the wrong one is a tap away.
+
+    class="svc" because sleep_on/sleep_off are in netui.c's LOCKED[] list: a
+    button that is visible while the board refuses it is the exact thing the
+    mode buttons used to do.  One mechanism hides all of them.
+
+    The confirm only appears on the OFF direction, and render() puts it there.
+    Turning sleep off is how a pack that should last a month lasts a day; the
+    firmware persists either choice, so it survives the next reflash.
+  -->
+  <div class="btns svc" style="margin-top:8px">
+    <button id="btn_sleep" data-a="sleep_on">Turn deep sleep ON</button>
+  </div>
+  <!--
+    The TEST mode's counts, and why the chip last restarted.  Always shown once
+    anything is known, because "last restart: brownout" is the answer the loop
+    exists to produce.  The mode itself is switched with the mode buttons.
+  -->
+  <div id="v_test" style="margin-top:8px;font-size:12px;color:var(--dim)"></div>
+  <!--
+    Why the radio is off, in words, not just "link waits for the window".
+    The pill has room for four of them and the three things somebody needs are
+    that it is off, WHICH hours it runs in, and how to override that.  On
+    2026-09-09 an afternoon went into scanning for a board that was not
+    advertising because it was the afternoon.
+  -->
+  <div style="margin-top:8px;font-size:12px;color:var(--dim)" id="link_note"></div>
+  <!-- The bait lockout.  Its own line and not part of the door pill, because
+       the thing it explains is a door that is SHUT when the schedule says it
+       should be open -- which reads as a broken schedule until you know a fox
+       emptied the slot. -->
+  <div style="margin-top:8px;font-size:12px;color:var(--dim)" id="bait_note"></div>
+  <div style="margin-top:8px;font-size:12px;color:var(--dim)" id="v_meta">&nbsp;</div>
+</div>
+
+<!--
+  The actions, GROUPED.
+
+  They were one flat grid of ten, and at that size a grid stops being a list
+  and becomes a search: "Zero counter" sat between "Reset ToF" and "End
+  lockout" with nothing to say that the first two are about the sensor and the
+  board while the third is about a fox.  Pita, 2026-09-15: "d button 可否分類?
+  而家有d 亂".
+
+  Four groups, in the order somebody standing at the machine needs them: what
+  the machine is doing, the door, the bait, then the board itself.  The label
+  is the same small uppercase heading the other cards use, so this reads as
+  part of the page rather than as a new kind of thing.
+-->
+<div class="card">
+  <!--
+    AUTO / LINK is behind the service PIN, so the BUTTONS have to be too.
+    They were not, until 2026-09-15: the board refused mode_link and the page
+    showed a live button that simply never worked -- "confirm 完佢無做過野".
+    A control that is offered and always refused is worse than one that is not
+    offered, because the second at least tells you where you stand.
+
+    Which mode the board is in is still on the status card above, so nothing is
+    hidden except the ability to change it.
+  -->
+  <div class="svc" style="display:none">
+    <div class="grp">mode</div>
+    <div class="btns">
+      <button id="btn_m_auto" data-a="mode_auto">AUTO</button>
+      <button id="btn_m_link" data-a="mode_link">LINK</button>
+      <button id="btn_m_test" data-a="mode_test">TEST</button>
+    </div>
+    <!-- BENCH / FIELD (Pita 2026-10-20): four power settings at once, see
+         storage.h.  Not a mode: the board keeps its mode.  Neither pressed =
+         someone changed one of the four by hand ("custom"). -->
+    <div class="grp">power settings</div>
+    <div class="btns">
+      <button id="btn_p_bench" data-a="profile_bench">BENCH</button>
+      <button id="btn_p_field" data-a="profile_field">FIELD</button>
+    </div>
+    <div class="foot" id="profile_note" style="text-align:left;padding:4px 0 0"></div>
+  </div>
+
+  <div class="grp">door</div>
+  <div class="btns">
+    <button id="btn_door_open"  data-a="door_open">Open door</button>
+    <button id="btn_door_close" data-a="door_close">Close door</button>
+  </div>
+
+  <div class="grp">bait</div>
+  <div class="btns">
+    <button id="btn_dispense" data-a="dispense" class="warn"
+            data-confirm="Run one dispense cycle?">Dispense</button>
+    <button data-a="slot">Read slot</button>
+    <button data-a="count_reset" class="warn"
+            data-confirm="Zero the bait counter?">Zero counter</button>
+    <button data-a="bait_unlock" class="warn" id="btn_bait_unlock"
+            data-confirm="End the 45-minute lockout and let the schedule open the door?">End lockout</button>
+  </div>
+
+  <div class="grp">board</div>
+  <div class="btns">
+    <button data-a="lcd_on">LCD on</button>
+    <button data-a="tof_reset">Reset ToF</button>
+    <button data-a="wifi_off" class="warn" id="btn_wifi_off">Wi-Fi off</button>
+  </div>
+
+  <div id="msg">&nbsp;</div>
+</div>
+
+<!--
+  Setting the actuator positions by eye.  A number typed into a box tells you
+  nothing until you press "open"; these move the thing NOW, so you set it while
+  looking at it.  Every move arms the door hold, which is what stops the
+  schedule (or the camera in LINK mode) putting it back a tick later.
+
+  ONE CARD, TWO MACHINES.  Which half is shown comes from a.machine:
+
+    auger     the door is a 180-degree servo between two saved angles, so the
+              nudges drive the DOOR.
+    vertical  the door is continuous-rotation and has no angle at all -- open
+              ends at a limit switch, shut is a timed run.  There is nothing to
+              nudge.  What does have angles on that machine is the dispenser
+              ARM, and both of its ends ship as placeholders that have to be
+              found on the mechanism, so the card drives that instead.
+
+  Hidden rather than disabled: a greyed-out row of buttons invites somebody to
+  work out why, and the answer ("this mechanism has no angles") is already on
+  the machine card at the bottom of the page.
+-->
+<!--
+  The service lock.
+
+  Everything below this card changes CALIBRATION or IDENTITY: door angles
+  somebody had to stand in a paddock to find, the clock the whole schedule
+  rests on, the settings table, and which machine this even is.  Pita,
+  2026-09-15: "呢d setting 我唔想一般user 郁到".
+
+  The cards are hidden, not disabled, because a greyed-out control still reads
+  as "this is a thing you do here".  The REAL lock is in netui.c -- hiding a
+  card hides a button and not an endpoint.
+-->
+<div class="card" id="lock_card" style="display:none">
+  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+    <b style="font-size:11px;font-weight:600;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;flex:1">service settings</b>
+    <span class="pill off">LOCKED</span>
+  </div>
+  <div style="font-size:12px;color:var(--dim);margin-top:6px">
+    Door angles, the clock, the settings list and the machine type are hidden.
+    Everything needed to run the station &mdash; the door, a dispense, the
+    counter, the lockout &mdash; is above and needs no PIN.
+  </div>
+  <div style="display:flex;gap:6px;margin-top:8px;align-items:center">
+    <input id="pin_in" type="password" inputmode="numeric" maxlength="4"
+           placeholder="PIN" style="width:90px;padding:6px 8px">
+    <button id="btn_unlock" style="padding:6px 12px">Unlock</button>
+  </div>
+</div>
+
+<div class="card" id="unlocked_card" style="display:none">
+  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+    <b style="font-size:11px;font-weight:600;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;flex:1">service settings</b>
+    <button data-a="lock" style="padding:6px 12px">Lock</button>
+  </div>
+  <div style="font-size:12px;color:var(--dim);margin-top:6px">
+    Unlocked until the Wi-Fi drops &mdash; which it does by itself. Nothing to
+    remember to re-lock.
+  </div>
+</div>
+
+<!-- Everything inside this wrapper is behind the service PIN.  A wrapper and
+     not five separate hides, because two of these cards already have a
+     machine-dependent display of their own and a second writer to the same
+     style attribute is how one of them ends up permanently invisible. -->
+<div id="service_cards" class="svc" style="display:none">
+
+<div class="card" id="angle_card">
+  <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">
+    <b id="v_angletitle" style="font-size:11px;font-weight:600;color:var(--dim);text-transform:uppercase;letter-spacing:.5px">door angle</b>
+    <span id="v_deg" style="font-size:21px;font-weight:600;font-variant-numeric:tabular-nums">--</span>
+    <small id="v_degnote" style="color:var(--dim)">&nbsp;</small>
+  </div>
+
+  <!-- auger: the door itself has the angles -->
+  <div id="angle_door">
+    <div class="btns" style="margin-top:8px">
+      <button data-a="door_nudge" data-d="-5">&minus;5&deg;</button>
+      <button data-a="door_nudge" data-d="-1">&minus;1&deg;</button>
+      <button data-a="door_nudge" data-d="1">+1&deg;</button>
+      <button data-a="door_nudge" data-d="5">+5&deg;</button>
+    </div>
+    <div class="btns" style="margin-top:8px">
+      <button data-a="door_save_open"  class="warn" data-confirm="Save where the door is now as the OPEN position?">Set as OPEN</button>
+      <button data-a="door_save_close" class="warn" data-confirm="Save where the door is now as the SHUT position?">Set as SHUT</button>
+    </div>
+  </div>
+
+  <!-- vertical: the dispenser ARM has them, and both ends are placeholders -->
+  <div id="angle_bait" style="display:none">
+    <div class="btns" style="margin-top:8px">
+      <button data-a="bait_park" data-d="0">0&deg;</button>
+      <button data-a="bait_park" data-d="45">45&deg;</button>
+      <button data-a="bait_park" data-d="90">90&deg;</button>
+      <button data-a="bait_park" data-d="135">135&deg;</button>
+      <button data-a="bait_park" data-d="180">180&deg;</button>
+    </div>
+    <div class="btns" style="margin-top:8px">
+      <button data-a="bait_nudge" data-d="-5">&minus;5&deg;</button>
+      <button data-a="bait_nudge" data-d="-1">&minus;1&deg;</button>
+      <button data-a="bait_nudge" data-d="1">+1&deg;</button>
+      <button data-a="bait_nudge" data-d="5">+5&deg;</button>
+    </div>
+    <div class="btns" style="margin-top:8px">
+      <button data-a="bait_save_home"  class="warn" data-confirm="Save where the arm is now as the HOME position?">Set as HOME</button>
+      <button data-a="bait_save_throw" class="warn" data-confirm="Save where the arm is now as the THROW position?">Set as THROW</button>
+    </div>
+  </div>
+</div>
+
+<!--
+  The vertical door, which is the only door on either machine that can be
+  MEASURED -- and only at one end.  Shown on that machine alone, because on the
+  auger one every field in it is permanently false and a row of dead
+  indicators is worse than no row.
+-->
+<div class="card" id="vdoor_card" style="display:none">
+  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+    <b style="font-size:11px;font-weight:600;color:var(--dim);text-transform:uppercase;letter-spacing:.5px">door</b>
+    <span id="p_dstate" class="pill off">--</span>
+    <span id="p_dlimit" class="pill off">limit</span>
+    <span id="p_dmove"  class="pill off">still</span>
+  </div>
+  <!-- v_vdoornote, not v_doornote: the summary card above already owns that
+       id, and a duplicate meant getElementById() handed BOTH writers the same
+       element -- so this card rendered empty while its paragraph appeared in
+       the one-line <small> beside "door" in the summary. -->
+  <div id="v_vdoornote" style="font-size:12px;color:var(--dim);margin-top:6px"></div>
+</div>
+
+<!--
+  Every tuneable, fetched from /api/cfg.  The rows are built from what the
+  BOARD reports, limits included, so this page cannot drift out of step with
+  what the firmware will accept, and a setting added to the firmware shows up
+  here without touching this file.  Loaded on demand: 32 rows do not belong in
+  a status page that polls every second.
+-->
+<!--
+  The clock.
+
+  It earns a card rather than a settings row because it is not a tuneable: it
+  is a value only the person standing here can supply, and until 2026-09-08 the
+  only way to supply it was `rtc YYYY-MM-DD HH:MM:SS` over a USB cable.  The
+  board was reading a month fast at the time, which no amount of "clock ok"
+  would have shown -- so the current reading is printed next to the box that
+  overwrites it.
+-->
+<div class="card" id="clock_card">
+  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+    <b style="font-size:11px;font-weight:600;color:var(--dim);text-transform:uppercase;letter-spacing:.5px">clock</b>
+    <span id="v_clock" style="font-variant-numeric:tabular-nums">--</span>
+    <small id="v_clocknote" style="color:var(--dim)">&nbsp;</small>
+  </div>
+  <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;align-items:center">
+    <input id="clk_in" type="datetime-local" step="1"
+           style="flex:1;min-width:170px;font:inherit;padding:6px;border:1px solid var(--line);border-radius:7px">
+    <button id="btn_clk_now" type="button">Now</button>
+    <button id="btn_clk_set" type="button" class="warn">Set</button>
+  </div>
+</div>
+
+<div class="card" id="cfg_card">
+  <div style="display:flex;align-items:center;gap:8px">
+    <b style="font-size:11px;font-weight:600;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;flex:1">settings</b>
+    <button id="btn_cfg" style="padding:6px 12px">Show</button>
+  </div>
+  <div id="cfgbox" style="display:none;margin-top:8px"></div>
+</div>
+
+
+<!--
+  WHICH MACHINE.
+
+  Deliberately NOT a row in the settings list above, and not because it would
+  not fit.  Every row there is a number you tune while looking at the machine,
+  set one at a time, wrong values bounced by the firmware's own limits.  This
+  one decides which HALF of that list is even live -- and a board driving the
+  wrong mechanism moves things, which no wrong number in that list can do.
+  Separate card, its own confirm, and at the bottom of the page where nothing
+  else is.
+
+  It changes NO TUNING.  It used to, and the confirm here used to say so; R1
+  removed the reset and this text outlived it by an iteration, telling people a
+  safe button was expensive.  That is the same shape as main.c saying "arm"
+  while the console said "door", and it is worth as much attention: a warning
+  nobody can verify is a warning nobody will believe next time.
+
+  It is rarely needed.  The firmware works the machine out for itself from the
+  board's own stored settings; this is for a brand-new board, one being
+  converted from one mechanism to the other, or one that has run both old
+  firmwares and so cannot be told apart from its storage.
+-->
+<div class="card" id="machine_card">
+  <div style="display:flex;align-items:center;gap:8px">
+    <b style="font-size:11px;font-weight:600;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;flex:1">machine</b>
+    <span id="v_machine" style="font-weight:600">--</span>
+  </div>
+  <div id="machine_note" style="font-size:12px;color:var(--dim);margin-top:6px"></div>
+  <div id="machine_pick" style="display:none;margin-top:8px">
+    <div class="row">
+      <button data-a="machine_auger" class="warn"
+        data-confirm="Set this board to the AUGER machine?&#10;&#10;No tuning is changed: it decides which half of the settings the firmware reads. If this board still holds the old auger firmware's settings, they are adopted too.&#10;&#10;The board REBOOTS straight away to apply it; the Wi-Fi comes back in a few seconds.">Auger</button>
+      <button data-a="machine_vertical" class="warn"
+        data-confirm="Set this board to the VERTICAL machine?&#10;&#10;No tuning is changed: it decides which half of the settings the firmware reads. If this board still holds the old vertical firmware's settings, they are adopted too.&#10;&#10;The board REBOOTS straight away to apply it; the Wi-Fi comes back in a few seconds.">Vertical</button>
+    </div>
+    <div style="font-size:12px;color:var(--dim);margin-top:6px">
+      Changing it reboots the board by itself, so every mechanism starts from a known state.
+    </div>
+  </div>
+  <button id="btn_machine" style="padding:6px 12px;margin-top:8px">Change</button>
+</div>
+
+</div><!-- /service_cards -->
+
+<!-- The confirmation dialog.  Ours, not the browser's -- see the note by
+     ask() for why the native one could not be used. -->
+<div id="ask">
+  <div id="ask_card">
+    <div id="ask_text"></div>
+    <div id="ask_row">
+      <button id="ask_no">Cancel</button>
+      <button id="ask_yes" class="warn">Yes, do it</button>
+    </div>
+  </div>
+</div>
+
+<div class="foot" id="v_foot">&nbsp;</div>
+
+<script>
+"use strict";
+var lastGood = 0, misses = 0, busy = false;
+
+function $(id){ return document.getElementById(id); }
+function pill(el, cls, text){ el.className = "pill " + cls; if (text !== undefined) el.textContent = text; }
+function say(t){ $("msg").textContent = t || " "; }
+
+function setIris(openFrac, known){
+  /* A real iris opens by growing a polygonal aperture as the blades twist.
+     Five sectors all rotated by the same angle still cover the whole circle --
+     that version looked like it worked and never opened. */
+  var CX = 206, CY = 366, R = 60;
+  var r   = 4 + 46 * openFrac;
+  var rot = -16 + 30 * openFrac;
+  var pts = [], seams = "";
+  for (var i = 0; i < 5; i++){
+    var t = (rot + i * 72 - 90) * Math.PI / 180;
+    pts.push([CX + r * Math.cos(t), CY + r * Math.sin(t)]);
+    var u = t + 62 * Math.PI / 180;
+    seams += "M" + pts[i][0].toFixed(1) + "," + pts[i][1].toFixed(1)
+           + "L" + (CX + R * Math.cos(u)).toFixed(1) + "," + (CY + R * Math.sin(u)).toFixed(1);
+  }
+  var ring = "M" + (CX - R) + "," + CY
+           + "a" + R + "," + R + " 0 1,0 " + (2 * R) + ",0"
+           + "a" + R + "," + R + " 0 1,0 " + (-2 * R) + ",0Z";
+  var poly = "M" + pts.map(function(p){ return p[0].toFixed(1) + "," + p[1].toFixed(1); }).join("L") + "Z";
+  var el = $("iris");
+  el.setAttribute("d", ring + poly);
+  el.style.opacity = known ? 1 : 0.5;
+  $("seams").innerHTML = '<path d="' + seams + '"/>';
+  $("seams").style.opacity = known ? 1 : 0.5;
+}
+
+function render(s){
+  var a = s.app || {};
+  var b = s.batt || {};
+  var n = s.net || {};
+
+  /* ---- headline ---- */
+  var st = (a.status || "?").toUpperCase();
+  pill($("p_status"), st === "NORMAL" ? "ok" : (st === "EMPTY" ? "warn" : "bad"), st);
+  pill($("p_mode"), a.mode === "auto" ? "ok" : "warn", (a.mode || "?").toUpperCase());
+  renderMachine(a);
+  /* The radio, and what it is being asked to do.  "up" and the heartbeat age
+     are measured; there is no "connected" here because the firmware does not
+     report one -- see the note beside the link block in state_json.c. */
+  var L = a.link || {};
+  if (a.mode !== "link" && !L.up){
+    pill($("p_ble"), "off", "link off");
+  } else if (!L.up){
+    /* "STARTING" only while there is something to wait for.  With
+       link_always = 1 the window is never consulted, so L.window is
+       permanently true and this pill used to read "link STARTING" for ever on
+       a radio that had failed to come up at all. */
+    pill($("p_ble"), "warn", !L.window ? "link waits for the window"
+                           : L.always  ? "link not up"
+                                       : "link STARTING");
+  } else if (L.hb_s === undefined || L.hb_s < 0){
+    pill($("p_ble"), "warn", (L.name || "link") + " advertising");
+  } else {
+    var lost = (L.heartbeat_s > 0 && L.hb_s >= L.heartbeat_s);
+    pill($("p_ble"), lost ? "bad" : "ok",
+         (L.name || "link") + " " + L.hb_s + "s" + (lost ? " LOST" : ""));
+  }
+  renderLinkWindow(a);
+  renderBaitLockout(a);
+  renderServiceLock(a);
+
+  /* ---- door / iris ---- */
+  var known = !!a.door_known;
+  var open = !!a.door_open;
+  setIris(known ? (open ? 1 : 0) : 0.5, known);
+  $("t_door").textContent = known ? (open ? "OPEN " + a.door_deg + "°"
+                                          : "shut " + a.door_deg + "°")
+                                  : "position unknown";
+  $("v_door").textContent = known ? (open ? "open" : "shut") : "?";
+  $("v_doornote").textContent =
+      a.bait_close_s  ? ("bait taken \u2014 shuts in " + a.bait_close_s + " s")
+    : a.bait_shut_min ? ("bait taken \u2014 shut " + a.bait_shut_min + " min")
+    : a.door_hold_s   ? ("held " + a.door_hold_s + " s")
+    : (known ? " " : "not moved since boot");
+  $("servobox").setAttribute("fill", s.servo_rail ? "#e8590c" : "#8b98a5");
+
+  /* ---- auger / stepper ---- */
+  var spinning = !!a.dispensing;
+  $("augerspin").classList.toggle("run", spinning);
+  $("augerfront").setAttribute("stroke", spinning ? "#e8590c" : (s.driver_awake ? "#6b4a2a" : "#22262a"));
+  $("t_auger").textContent = spinning ? "TURNING" : (s.driver_awake ? "driver awake" : "stepper asleep");
+
+  /* ---- slot / ToF ----
+     Three states, not two.  tof_ok before anything has read the sensor is an
+     assumption, and showing an assumption as a measurement is exactly how a
+     missing module once got reported as "answering". */
+  var mm = a.slot_mm;
+  var empty = a.empty_mm;
+  var tofCls, tofTxt;
+  if (!a.tof_asked)      { tofCls = "off";  tofTxt = "ToF not tested"; }
+  else if (a.tof_ok)     { tofCls = "ok";   tofTxt = "ToF ok"; }
+  else                   { tofCls = "bad";  tofTxt = "ToF SILENT"; }
+  if (a.tof_resets) tofTxt += " (" + a.tof_resets + "× reset)";
+  pill($("p_tof"), tofCls, tofTxt);
+
+  var loaded = null;
+  /* empty_dir 1 = a reading BELOW empty_mm is empty (sensor mounted the other
+     way round); absent on older firmware = 0, the original rule. */
+  var below = (a.empty_dir === 1);
+  if (a.tof_asked && a.tof_ok && mm >= 0) loaded = below ? (mm >= empty) : (mm <= empty);
+  $("v_slot").textContent = (mm >= 0) ? (mm + " mm") : "--";
+  $("v_slotnote").textContent = (loaded === null) ? ("empty " + (below ? "below " : "above ") + empty + " mm")
+                                : (loaded ? "loaded" : "EMPTY (" + (below ? "< " : "> ") + empty + " mm)");
+  $("t_slot").textContent = (mm >= 0) ? (mm + " mm") : "no reading";
+  $("beam").setAttribute("stroke", loaded === false ? "#c0392b" : "#1d3a6b");
+  $("slotbox").setAttribute("fill", loaded === true ? "#f0a34a" : "#ffffff");
+  $("slotbox").setAttribute("opacity", loaded === true ? "0.9" : "0.55");
+
+  /* ---- pack ----
+     8.2 V is the DRV8825's floor, and app.c refuses a dispense below it. */
+  var v = (b.volts === undefined) ? null : b.volts;
+  $("v_batt").textContent = (v === null) ? "--" : v.toFixed(2) + " V";
+  var note = " ";
+  if (v !== null){
+    if (v < 6.0)      note = "USB only — no pack";
+    else if (v < 8.2) note = "below 8.2 V — dispense refused";
+    else if (v < 9.6) note = "low";
+    else              note = b.calibrated ? "ok" : "ok (uncalibrated ADC)";
+  }
+  $("v_battnote").textContent = note;
+  $("pack").setAttribute("fill", (v !== null && v >= 8.2) ? "#1a7f37"
+                               : (v !== null && v >= 6.0) ? "#c0392b" : "#8b98a5");
+
+  /* How to get back in, in words, from the board's own setting.  Writing the
+     number into the page would put it in two places, and two places is how a
+     number goes stale in one of them. */
+  var taps = (n.taps === undefined) ? 0 : n.taps;
+  var tapPhrase = ["no times","once","twice","three times","four times","five times"][taps]
+                  || (taps + " times");
+  /* One sentence, used verbatim by both the confirm and the countdown banner,
+     so the two can never disagree about how to get back in. */
+  var howBack = (taps >= 2)
+    ? ("To bring it back, tap the button on J11 " + tapPhrase
+       + " -- the iris swings once and returns to say it worked.")
+    : ("The button cannot bring it back: cfg wifi_taps is " + taps
+       + ", so that will need a USB cable.");
+
+  $("btn_wifi_off").setAttribute("data-confirm",
+    "Turn the radio off?  This page will stop working.  " + howBack);
+
+  /* ---- counters ---- */
+  $("v_bait").textContent = (a.bait === undefined) ? "--" : a.bait;
+  $("v_baitnote").textContent = "retry " + (a.retries || 0) + " of " + (a.max_retries || "?");
+
+  /* ---- AUTO / MANUAL / LINK ----
+     Three named buttons, not a toggle.  With two modes "the move you can make"
+     fitted on one button; with three that becomes a cycle, and a cycle is a
+     button you have to reason about before pressing.  The mode you are in is
+     shown pressed and disabled, so the live ones are the moves available.
+
+     TWO buttons since 2026-09-15.  MANUAL went, and with it the J12 switch
+     that picked between it and AUTO; what MANUAL was for -- opening the door
+     by hand at the machine -- is a HOLD on the button now, and works in both
+     of the modes that are left. */
+  var MODES = [["auto","btn_m_auto",
+                "Switch to AUTO?  The schedule takes the door back and dispensing resumes."],
+               ["link","btn_m_link",
+                "Switch to LINK?  The camera on ninti-11 opens and shuts the iris over BLE. The schedule stops touching the door."],
+               /* TEST (2026-09-30, Pita: "mode 加多個TEST mode"): a bench
+                  loop.  Its confirm says how to get OUT, because it survives
+                  a restart and nothing else will end it. */
+               ["test","btn_m_test",
+                "Switch to TEST?  The door opens, shuts and the dispenser runs, half a second apart, over and over. It carries on by itself after a restart. Press AUTO or LINK to stop it."]];
+  for (var mi = 0; mi < MODES.length; mi++){
+    var name = MODES[mi][0], el = $(MODES[mi][1]), here = (a.mode === name);
+    if (!el) continue;
+    el.disabled = here;
+    el.className = here ? "on" : "";
+    if (here) el.removeAttribute("data-confirm");
+    else      el.setAttribute("data-confirm", MODES[mi][2]);
+  }
+
+  var PROFILES = [["BENCH","btn_p_bench",
+                   "Switch to BENCH?  Wakes every 60 s with the door open, stays up 10 min after a press, LCD 5 min, Wi-Fi 1 h. Uses more battery."],
+                  ["FIELD","btn_p_field",
+                   "Switch to FIELD?  Wakes every 5 min with the door open, stays up 100 s after a press, LCD 60 s, Wi-Fi 15 min."]];
+  for (var pi = 0; pi < PROFILES.length; pi++){
+    var pel = $(PROFILES[pi][1]), phere = (a.profile === PROFILES[pi][0]);
+    if (!pel) continue;
+    pel.disabled = phere;
+    pel.className = phere ? "on" : "";
+    if (phere) pel.removeAttribute("data-confirm");
+    else       pel.setAttribute("data-confirm", PROFILES[pi][2]);
+  }
+  if ($("profile_note"))
+    $("profile_note").textContent = a.profile === "custom"
+      ? "custom -- one of the four settings was changed by hand; press BENCH or FIELD to reset them"
+      : "now " + a.profile;
+
+  /* ---- door angle ----
+     door_deg is where the iris IS; door_open_deg / door_close_deg are what the
+     board has been told those positions MEAN.  Both are shown because the gap
+     between them is exactly what you are closing. */
+  renderAngles(a, known);
+  renderVerticalDoor(a);
+  renderVerticalDiagram(a, s);
+
+  /* ---- rails and services ---- */
+  pill($("p_servo"), s.servo_rail ? "hot" : "off", "SERVO 5V " + (s.servo_rail ? "ON" : "off"));
+  pill($("p_lcd"),   s.lcd_rail   ? "hot" : "off", "LCD 5V " + (s.lcd_rail ? "ON" : "off"));
+  pill($("p_drv"),   s.driver_awake ? "hot" : "off", "DRV8825 " + (s.driver_awake ? "AWAKE" : "asleep"));
+  pill($("p_rtc"),   a.rtc_ok ? "ok" : "bad", a.rtc_ok ? "clock ok" : "NO CLOCK");
+
+  /* Three states, not two.  "" does NOT mean "no clock": state_json.c leaves
+     the string empty when the 200 ms lock was busy (a dispense is running), and
+     showing "no clock" for two seconds every dispense would send someone to
+     look at J10 for a fault that is not there.  a.rtc_ok is the answer to
+     "is there a clock"; the string is only the reading.  Absent entirely =
+     firmware older than 2026-09-08, which gets the dash as well. */
+  $("v_clock").textContent = a.clock ? a.clock : (a.rtc_ok === false ? "no clock" : "--");
+  $("v_clocknote").textContent =
+        a.rtc_ok === false ? "not usable -- the schedule cannot run"
+      : a.clock            ? ""
+                           : "busy";
+  /* WHICH sleep, not just when.  "sleep in 60 s" was the only thing this said,
+     and in LINK mode it is a lie in the useful direction: the board is holding
+     a BLE link up and light-sleeping between connection events, and will not
+     deep-sleep at all while the radio is wanted.  a.sleep_kind is absent on
+     older firmware, which falls through to exactly the old text.  light_armed
+     is separate on purpose -- a USB cable holds a NO_LIGHT_SLEEP lock, so on a
+     bench "light" is the plan and not the state. */
+  pill($("p_sleep"),
+       !a.sleep_enabled ? "warn" : (a.sleep_kind === "light" && !a.light_armed ? "warn" : "ok"),
+       !a.sleep_enabled ? "sleep OFF"
+       : a.sleep_kind === "light"
+         ? ("light sleep" + (a.light_armed ? "" : " (not armed)"))
+         : ("sleep in " + a.next_sleep_s + " s"));
+  $("p_sleep").title = a.sleep_why || "";
+
+  /* The button follows a.sleep_enabled rather than tracking its own idea of
+     the state: the console, the settings row and another phone can all change
+     it, and a button that remembers what it last did would then send the
+     wrong one. */
+  var sb = $("btn_sleep");
+  if (sb){
+    if (a.sleep_enabled){
+      sb.textContent = "Turn deep sleep OFF";
+      sb.setAttribute("data-a", "sleep_off");
+      sb.className = "warn";
+      sb.setAttribute("data-confirm",
+        "Turn deep sleep OFF?\n\nThe board then stays awake between checks. "
+        + "On a pack that is the difference between weeks and about a day. "
+        + "It is saved, so it stays off across a reboot or a reflash.");
+    } else {
+      sb.textContent = "Turn deep sleep ON";
+      sb.setAttribute("data-a", "sleep_on");
+      sb.className = "";
+      sb.removeAttribute("data-confirm");
+    }
+  }
+  var t = a.test || {};
+  /* TEST mode's tally (Pita, 2026-09-30: "record 低dispend 左幾多同open 左幾多次,
+     係web ui 要睇得番").  Opens and dispenses are counted separately, each with
+     its failures, because "the door stopped short" and "the drum never found
+     J12" are different faults with different fixes. */
+  var seen = t.on || t.opens || t.dispenses;
+  $("v_test").textContent =
+      (t.on ? ("TEST running, " + t.step + " \u00b7 ")
+            : (seen ? "TEST stopped \u00b7 " : ""))
+    + (seen
+        ? ("opened " + t.opens + " (" + t.open_faults + " failed), "
+           + "closed " + t.shuts + " (" + t.shut_faults + " failed), "
+           + "dispensed " + t.dispenses + " (" + t.dispense_faults + " failed), "
+           + t.restarts + " restarts \u00b7 ") : "")
+    + "last restart: " + (a.reset_reason || "?");
+  $("pcb").setAttribute("fill", "#2f6b3f");
+
+  $("v_meta").textContent =
+      "idle " + a.idle_s + "/" + a.awake_timeout_s + " s   ·   "
+    + "up " + Math.floor((s.uptime_ms || 0) / 60000) + " min   ·   woke on " + s.wake
+    + (n.ssid ? ("   ·   " + n.ssid + ", " + n.clients + " client"
+                 + (n.clients === 1 ? "" : "s")
+                 + (n.left_s ? (", radio off in " + n.left_s + " s") : "")) : "");
+  $("v_foot").textContent = s.mac || "";
+
+  /* The radio is what holds deep sleep off, and that inhibit is bounded by
+     the AP's own timeout.  Say so, because a board that never sleeps again is
+     the failure this is guarding against. */
+  var bn = $("banner");
+  if (n.left_s && n.left_s < 120){
+    bn.style.display = "block";
+    bn.textContent = "The radio drops itself in " + n.left_s + " s and this page will stop"
+                   + " working.  Any button here restarts that countdown.  " + howBack;
+  } else { bn.style.display = "none"; }
+}
+
+function poll(){
+  fetch("/api/state", {cache:"no-store"})
+    .then(function(r){ return r.json(); })
+    .then(function(s){
+      lastGood = Date.now(); misses = 0;
+      document.body.classList.remove("stale");
+      pill($("p_link"), "ok", "live");
+      render(s);
+    })
+    .catch(function(){
+      misses++;
+      if (misses > 2){
+        document.body.classList.add("stale");
+        pill($("p_link"), "bad", "no answer");
+        say("No answer from the board.  It may have gone to sleep, or the phone"
+            + " lost Bluetooth.  Press the board's button, then Connect.");
+      }
+    });
+}
+
+/* ---- confirmations: a dialog this page DRAWS ITSELF ----
+   It used to be confirm(), and on 2026-09-15 every yellow button was found
+   silently dead.  The page was being viewed through the iOS captive-portal
+   sheet, which is a WKWebView, and a WKWebView whose host sets no uiDelegate
+   IGNORES alert()/confirm() -- the call returns and the page carries on as
+   though the user had said no.  The one dialog in this page was therefore the
+   one thing that could not be seen, on exactly the surface the captive portal
+   added the same morning puts people on.
+
+   So the page draws its own.  Same shape as the native one -- a question and
+   two named choices -- but it is our own DOM, which no WebView can decline to
+   render.  The first replacement relabelled the button to "Tap again" instead;
+   it worked, and it asked the operator to notice that a label had changed,
+   which is not a thing to rely on with a hopper in one hand. */
+var askOk = null;
+
+function ask(text, ok){
+  $("ask_text").textContent = text;
+  $("ask").style.display = "flex";
+  askOk = ok;
+  /* Focus the SAFE choice.  A dialog that arrives with the destructive button
+     under the thumb is a dialog that confirms itself. */
+  $("ask_no").focus();
+}
+function askClose(){
+  $("ask").style.display = "none";
+  askOk = null;
+}
+$("ask_no").addEventListener("click", askClose);
+$("ask").addEventListener("click", function(e){
+  /* The backdrop, not the card: tapping beside the question means no. */
+  if (e.target === $("ask")) askClose();
+});
+$("ask_yes").addEventListener("click", function(){
+  var fn = askOk;
+  askClose();
+  if (fn) fn();
+});
+document.addEventListener("keydown", function(e){
+  if (e.key === "Escape" && askOk) askClose();
+});
+
+function runAction(btn){
+  if (busy) return;
+  busy = true;
+  document.querySelectorAll("button[data-a]").forEach(function(b){ b.disabled = true; });
+  say(btn.textContent + " \u2026");
+  var url = "/api/do?a=" + encodeURIComponent(btn.getAttribute("data-a"));
+  var d = btn.getAttribute("data-d");
+  if (d !== null) url += "&d=" + encodeURIComponent(d);
+  fetch(url, {cache:"no-store"})
+    .then(function(r){ return r.json(); })
+    .then(function(j){ say((j.ok ? "\u2713 " : "\u2717 ") + (j.msg || "")); })
+    .catch(function(){ say("\u2717 the board did not answer"); })
+    .then(function(){
+      busy = false;
+      document.querySelectorAll("button[data-a]").forEach(function(b){ b.disabled = false; });
+      poll();
+    });
+}
+
+document.querySelectorAll("button[data-a]").forEach(function(btn){
+  btn.addEventListener("click", function(){
+    var c = btn.getAttribute("data-confirm");
+    if (c) ask(c, function(){ runAction(btn); });
+    else   runAction(btn);
+  });
+});
+
+/* ---- settings ----
+   Rows come from the board, including lo/hi, so the input's own validation is
+   the firmware's validation.  Set is per row: a single Save for 32 fields
+   makes one bad value fail a batch you cannot see. */
+function cfgRow(f){
+  var wrap = document.createElement("div");
+  wrap.style.cssText = "display:flex;align-items:center;gap:6px;padding:5px 0;border-top:1px solid var(--line)";
+  var lab = document.createElement("div");
+  lab.style.cssText = "flex:1;min-width:0";
+  lab.innerHTML = '<div style="font-size:13px;font-weight:600;word-break:break-all">' + f.n + '</div>'
+                + '<div style="font-size:11px;color:var(--dim)">' + f.lo + "\u2013" + f.hi + " " + (f.u || "") + '</div>';
+  var inp = document.createElement("input");
+  inp.type = "number"; inp.value = f.v; inp.min = f.lo; inp.max = f.hi;
+  inp.style.cssText = "width:76px;font:inherit;padding:6px;border:1px solid var(--line);border-radius:7px;text-align:right";
+  var go = document.createElement("button");
+  go.textContent = "Set"; go.style.cssText = "padding:8px 12px";
+  go.addEventListener("click", function(){
+    var v = inp.value;
+    if (v === "" ) { say("nothing to set"); return; }
+    say(f.n + " \u2026");
+    fetch("/api/do?a=cfg_set&n=" + encodeURIComponent(f.n) + "&v=" + encodeURIComponent(v), {cache:"no-store"})
+      .then(function(r){ return r.json(); })
+      .then(function(j){ say((j.ok ? "\u2713 " : "\u2717 ") + (j.msg || "")); if (j.ok) loadCfg(); })
+      .catch(function(){ say("\u2717 the board did not answer"); });
+  });
+  wrap.appendChild(lab); wrap.appendChild(inp); wrap.appendChild(go);
+  return wrap;
+}
+
+function loadCfg(){
+  var box = $("cfgbox");
+  fetch("/api/cfg", {cache:"no-store"})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      box.innerHTML = "";
+      d.fields.forEach(function(f){ box.appendChild(cfgRow(f)); });
+    })
+    .catch(function(){ box.textContent = "could not read the settings"; });
+}
+
+$("btn_unlock").addEventListener("click", function(){
+  var v = ($("pin_in").value || "").replace(/\D/g, "");
+  if (!v){ say("\u2717 type the PIN first"); return; }
+  fetch("/api/do?a=unlock&p=" + encodeURIComponent(v), {cache:"no-store"})
+    .then(function(r){ return r.json(); })
+    .then(function(j){
+      say((j.ok ? "\u2713 " : "\u2717 ") + (j.msg || ""));
+      /* Clear it either way: a PIN left in a field is a PIN the next person
+         picks up, and on a success it has done its job. */
+      $("pin_in").value = "";
+      if (j.ok) poll();
+    })
+    .catch(function(){ say("\u2717 the board did not answer"); });
+});
+$("pin_in").addEventListener("keydown", function(e){
+  if (e.key === "Enter") $("btn_unlock").click();
+});
+
+$("btn_cfg").addEventListener("click", function(){
+  var box = $("cfgbox"), open = box.style.display !== "none";
+  box.style.display = open ? "none" : "block";
+  $("btn_cfg").textContent = open ? "Show" : "Hide";
+  if (!open) loadCfg();
+});
+
+
+
+/* ---- the angle card, and which mechanism owns it ----
+   auger     the DOOR is a 180-degree servo between two saved angles.
+   vertical  the door is continuous-rotation and has no angle at all; the
+             dispenser ARM is what has angles there, and both of its ends ship
+             as placeholders that have to be found on the mechanism. */
+function renderAngles(a, known){
+  var vertical = (a.machine === "vertical");
+  $("angle_door").style.display = vertical ? "none" : "block";
+  $("angle_bait").style.display = vertical ? "block" : "none";
+  $("v_angletitle").textContent = vertical ? "dispenser arm" : "door angle";
+
+  if (vertical){
+    /* There is no live readback for the arm: servo_last_deg() is not in the
+       state document, and inventing one from the saved values would be a
+       number that looks measured and is not. */
+    $("v_deg").textContent = "—";
+    $("v_degnote").textContent =
+        (a.bait_home_deg === undefined) ? " "
+        : (a.bait_home_deg === a.bait_throw_deg)
+          ? ("home and throw are BOTH " + a.bait_home_deg
+             + "° — the arm cannot move, so dispensing is refused")
+          : ("saved: home " + a.bait_home_deg + "° · throw "
+             + a.bait_throw_deg + "°");
+    return;
+  }
+
+  $("v_deg").textContent = known ? (a.door_deg + "°") : "--";
+  $("v_degnote").textContent =
+      (a.door_open_deg === undefined) ? " "
+      : ("saved: open " + a.door_open_deg + "° · shut " + a.door_close_deg + "°"
+         + (a.door_hold_s ? ("   · held " + a.door_hold_s + " s") : ""));
+}
+
+/* ---- the vertical door ----
+   The one place on either machine where "open" is a MEASUREMENT and "shut" is
+   only ever a COMMAND, so the page has to say which it is showing.  An open
+   that ran out of time without reaching the limit switch is a third state, and
+   collapsing it into "open" is exactly what this card exists to prevent. */
+function renderVerticalDoor(a){
+  var card = $("vdoor_card");
+  if (a.machine !== "vertical"){ card.style.display = "none"; return; }
+  card.style.display = "block";
+
+  var known = a.door_known, open = a.door_open;
+  pill($("p_dstate"), !known ? "off" : (open ? "ok" : "idle"),
+       !known ? "UNKNOWN" : (open ? "OPEN" : "SHUT"));
+  pill($("p_dlimit"), a.limit_now ? "ok" : "off",
+       a.limit_now ? "at the stop" : "not at the stop");
+  pill($("p_dmove"), a.door_moving ? "hot" : "off",
+       a.door_moving ? "MOVING" : "still");
+
+  var note;
+  if (!known)                   note = "Nothing has commanded the door since boot.";
+  else if (a.door_moving)       note = "The servo is being driven right now.";
+  else if (open && a.door_at_limit)
+    note = "Open, and the limit switch confirms it — this is the one thing "
+         + "on this machine that is actually measured.";
+  else if (open)
+    note = "COMMANDED open, but the run ended without the limit switch closing. "
+         + "Jammed, or nothing on J12. Raise door_open_max_ms only if the "
+         + "travel is genuinely slower than it allows.";
+  else
+    note = "Commanded shut. Nothing measures this end: the servo runs on PAST "
+         + "the stop for door_close_run_ms and gravity drops the flap."
+         + (a.limit_now ? "  The switch is STILL made, so the next open will "
+                        + "find the stop already there and do nothing — "
+                        + "raise door_close_run_ms." : "");
+  $("v_vdoornote").textContent = note;
+}
+
+/* ---- vertical mechanism schematic ----
+   Unlike the auger drawing, this one has no invented position.  The flap only
+   opens once J12 has measured the stop; an OPEN command that timed out remains
+   visibly shut.  The door servo is a continuous-rotation drive, so its orange
+   arrow means a run is in progress, never "it is at this angle". */
+function renderVerticalDiagram(a, s){
+  var shown = a.machine === "vertical";
+  $("vsvgwrap").style.display = shown ? "block" : "none";
+  if (!shown) return;
+
+  var moving = !!a.door_moving;
+  var atStop = !!a.door_at_limit;
+  var throwing = !!a.dispensing;
+
+  $("v_flap").setAttribute("transform", "translate(0 " + (atStop ? -74 : 0) + ")");
+  $("v_limit").setAttribute("fill", a.limit_now ? "#2f9e44" : "#c3cbd4");
+  $("v_limit_arm").setAttribute("stroke", a.limit_now ? "#2f9e44" : "#69788a");
+  $("v_limit_text").textContent = a.limit_now ? "stop made" : "open limit";
+
+  $("v_door_servo").setAttribute("fill", moving ? "#e8590c" : "#8b98a5");
+  $("v_motion_arrow").style.display = moving ? "block" : "none";
+  $("v_motion_text").textContent = moving ? "door RUNNING" : "";
+
+  $("v_bait_servo").setAttribute("fill", throwing ? "#e8590c" : "#8b98a5");
+  $("v_bait_arm").setAttribute("transform", "rotate(" + (throwing ? -52 : 0) + " 220 365)");
+  $("v_bait_text").textContent = throwing ? "THROWING" : "home";
+}
+
+/* ---- when the Link radio is actually on ----
+   The radio is DUTY-CYCLED in LINK mode: app_link_window() only wants it
+   between the door's own open and close hours, and outside them the board
+   deep-sleeps and stops advertising entirely.  That is not a fault and there
+   is nothing on the board to see, which is exactly the problem -- on
+   2026-09-09 an afternoon went into scanning for a board that was off because
+   it was the afternoon.
+
+   The page already had a pill for it ("link waits for the window"), and four
+   words is not enough: it does not say WHICH window, and it does not say that
+   `link_always` exists.  The console's `link` command has printed all three
+   since it was written; this is the page catching up, and the hours come from
+   the firmware (link.open_hour ...) rather than being typed here, so they
+   cannot drift from what the board is actually using.
+
+   It stays QUIET on AUTO and MANUAL with the radio down.  The radio is not
+   supposed to be up there, so a note about it would be noise on every board
+   that is working normally. */
+/* Quiet unless it is running: a line that says "not locked" on every poll is a
+   line nobody reads on the one night it matters. */
+/* ---- the service lock ----
+   `service` is true when the board will ACCEPT a calibration change -- either
+   somebody has entered the PIN this Wi-Fi session, or service_pin is 0 and the
+   lock is off.  The page only mirrors that; netui.c is what enforces it, so a
+   stale or forged `service` here buys nothing but a refusal from the board. */
+var wasService = null;
+
+function renderServiceLock(a){
+  /* Older firmware sends no `service` at all.  Treat that as unlocked rather
+     than hiding half the page against a board that has no lock to open. */
+  var open = (a.service === undefined) ? true : !!a.service;
+  /* ONE mechanism: everything the PIN covers carries class="svc", whether it
+     is a whole card or two buttons inside another one.  A second way to hide
+     something is how the mode buttons stayed visible while the board refused
+     them. */
+  var svc = document.querySelectorAll(".svc");
+  for (var si = 0; si < svc.length; si++)
+    svc[si].style.display = open ? "" : "none";
+  $("lock_card").style.display     = open ? "none"  : "block";
+  $("unlocked_card").style.display = open ? "block" : "none";
+  if (wasService !== open && !open){
+    /* Locking collapses the settings list, so it cannot sit expanded and
+       empty after the board starts refusing /api/cfg. */
+    var box = $("cfgbox");
+    if (box){ box.style.display = "none"; if ($("btn_cfg")) $("btn_cfg").textContent = "Show"; }
+  }
+  wasService = open;
+}
+
+function renderBaitLockout(a){
+  var el = $("bait_note");
+  if (!el) return;
+  /* The grace period comes FIRST: it is the live one, and it is the state a
+     person watching the machine is most likely to be trying to explain. */
+  if (a.bait_close_s){
+    el.textContent =
+      "A bait was taken. The door stays OPEN for " + a.bait_close_s
+      + " more second" + (a.bait_close_s === 1 ? "" : "s")
+      + ", so it does not move while the fox is still backing out. Then it "
+      + "shuts and the lockout starts. cfg close_delay_s changes the wait.";
+    return;
+  }
+  if (!a.bait_shut_min){ el.textContent = ""; return; }
+  el.textContent =
+    "A bait was taken: the door stays SHUT for " + a.bait_shut_min
+    + " more minute" + (a.bait_shut_min === 1 ? "" : "s")
+    + ", so one fox gets one bait (SOW). The schedule cannot reopen it; "
+    + "opening the door yourself, or the camera opening it, ends the lockout "
+    + "now. cfg bait_shut_min 0 turns it off.";
+}
+
+function renderLinkWindow(a){
+  var L = a.link || {}, el = $("link_note");
+  var hours = (L.open_hour === undefined) ? null
+            : (pad2(L.open_hour) + ":" + pad2(L.open_min) + "\u2013"
+               + pad2(L.close_hour) + ":" + pad2(L.close_min));
+
+  if (a.mode !== "link" && !L.up){ el.textContent = ""; return; }
+
+  if (L.always){
+    /* The opposite warning, and it has to arrive BEFORE the battery is flat:
+       with the window bypassed the radio never goes away, and neither does the
+       current it draws. */
+    el.textContent =
+      "link_always = 1: the " + (hours ? hours + " " : "")
+      + "window is BYPASSED and the radio runs 24 h. That is roughly 80 mA "
+      + "on a board that is not on USB. Set cfg link_always 0 to put the "
+      + "window back.";
+    return;
+  }
+
+  if (!L.up){
+    el.textContent = !L.window
+      ? ("The Link radio is OFF right now: it is outside the window"
+         + (hours ? ", and in LINK mode the radio only runs between " + hours : "")
+         + ". A BLE scan will not find this board until then. "
+         + "Set cfg link_always 1 to keep it up all day.")
+      : ("The Link radio is not up yet. It is inside the window"
+         + (hours ? " (" + hours + ")" : "")
+         + (a.rtc_ok === false
+              ? " -- the clock is unusable, and a bad clock counts as INSIDE, "
+                + "so this is 24 h in practice"
+              : "")
+         + ", so it should be starting.");
+    return;
+  }
+
+  el.textContent = hours
+    ? ("The radio is up. In LINK mode it runs between " + hours
+       + " and goes away with deep sleep outside them.")
+    : "";
+}
+
+/* ---- which machine ----
+   The unset case is not a cosmetic difference.  A board that has never been
+   told which mechanism it carries refuses to move the door or the dispenser,
+   so every control on this page above would sit there doing nothing with no
+   explanation.  It says so at the top instead. */
+function renderMachine(a){
+  var m = a.machine || "unset";
+  $("v_machine").textContent = m;
+
+  /* The two mechanisms have separate schematics.  Do not ever show both: the
+     drawing is live state, so the wrong machine's animated parts would lie. */
+  $("svgwrap").style.display = (m === "auger") ? "block" : "none";
+  $("vsvgwrap").style.display = (m === "vertical") ? "block" : "none";
+
+  var note = $("machine_note");
+  if (m === "auger"){
+    note.textContent = "Stepper drum, and the door is a 180\u00b0 servo between two saved angles."
+                     ;
+  } else if (m === "vertical"){
+    note.textContent = "Servo arm throws the bait.  The door is continuous-rotation: opening "
+                     + "runs to the limit switch, shutting runs on past it and gravity finishes.";
+  } else {
+    note.innerHTML = '<b style="color:var(--bad)">NOT SET \u2014 the door and the dispenser '
+                   + 'will not move.</b>  Either this board has never run one of the older '
+                   + 'firmwares, or it has run <i>both</i> and its own storage cannot say '
+                   + 'which mechanism is bolted on now.  The firmware will not guess.  Pick '
+                   + 'one below \u2014 if that machine\u2019s old settings are still on the '
+                   + 'board they come with it.';
+    $("machine_pick").style.display = "block";
+    $("btn_machine").style.display  = "none";
   }
 }
 
-$("bconn").onclick = connect;
-$("bsend").onclick = function(){ send($("cmd").value); $("cmd").value = ""; };
-$("cmd").addEventListener("keydown", function(e){ if (e.key === "Enter") $("bsend").onclick(); });
-$("bclr").onclick = function(){ $("out").textContent = ""; };
-document.addEventListener("click", function(e){
-  var b = e.target.closest("[data-c]");
-  if (!b || b.disabled) return;
-  if (b.dataset.q && !confirm(b.dataset.q)) return;
-  send(b.dataset.c);
+$("btn_machine").addEventListener("click", function(){
+  var box = $("machine_pick"), open = box.style.display !== "none";
+  box.style.display = open ? "none" : "block";
+  $("btn_machine").textContent = open ? "Change" : "Cancel";
 });
-setEnabled(false);
-if (!navigator.bluetooth) { $("nobt").style.display = ""; $("bconn").disabled = true; }
+
+/* ---- clock ----
+   The default comes from the phone, which is the only trustworthy clock in
+   the room. */
+function pad2(n){ return (n < 10 ? "0" : "") + n; }
+
+function localStamp(d){
+  /* Built from the LOCAL getters on purpose.  toISOString() is the obvious
+     one-liner and it returns UTC: in ACST (+9:30) it would set this board nine
+     and a half hours slow, silently, and the reading printed above would agree
+     with itself afterwards.  There is no timezone anywhere in this system --
+     the DS3231 holds local time and the schedule compares local minutes -- so
+     the browser's local fields are the right and only source. */
+  return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate())
+       + "T" + pad2(d.getHours()) + ":" + pad2(d.getMinutes()) + ":" + pad2(d.getSeconds());
+}
+
+/* Refilled every second UNTIL the field is touched, then never again.
+   Filling it once at load would go stale on a page left open -- press Set
+   twenty minutes later and you write a time twenty minutes old, with nothing
+   to show for it.  Refilling unconditionally would fight whoever is typing.
+   The flag is what separates those two. */
+var clkTouched = false;
+$("clk_in").addEventListener("input", function(){ clkTouched = true; });
+
+function clkRefresh(){ if (!clkTouched) $("clk_in").value = localStamp(new Date()); }
+
+$("btn_clk_now").addEventListener("click", function(){
+  clkTouched = false;
+  $("clk_in").value = localStamp(new Date());
+  say("filled in from this device");
+});
+
+$("btn_clk_set").addEventListener("click", function(){
+  var v = $("clk_in").value;
+  /* Strip to digits: httpd_query_key_value() on the board does not URL-decode,
+     so the colons encodeURIComponent() produces would arrive as %3A.  Digits
+     go through untouched.  A value with no seconds gives 12, with seconds 14 --
+     the firmware accepts both. */
+  var t = v.replace(/\D/g, "");
+  if (t.length !== 12 && t.length !== 14){ say("\u2717 pick a date and time first"); return; }
+  say("setting the clock \u2026");
+  fetch("/api/do?a=rtc_set&t=" + t, {cache:"no-store"})
+    .then(function(r){ return r.json(); })
+    .then(function(j){ say((j.ok ? "\u2713 " : "\u2717 ") + (j.msg || "")); if (j.ok){ clkTouched = false; poll(); } })
+    .catch(function(){ say("\u2717 the board did not answer"); });
+});
+
+setIris(0, false);
+clkRefresh();
+poll();
+setInterval(poll, 1000);
+setInterval(clkRefresh, 1000);
 </script>
 </body>
 </html>
