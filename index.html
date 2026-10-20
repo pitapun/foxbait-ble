@@ -72,6 +72,13 @@ svg{width:100%;height:auto;display:block}
      back the JSON the board answers with, so every card and button works the
      same as on the Wi-Fi AP.  One request at a time; a /api/state poll that
      arrives while one is already waiting shares its answer. -->
+<style>
+/* The page dims itself (body.stale) when the board stops answering -- which
+   over Bluetooth is exactly when Connect is the button to press.  Dim the
+   page, never the bar (Pita 2026-10-20: 「人地以為無得撳」). */
+body.stale{opacity:1}
+body.stale > *:not(#ble_bar):not(#ble_hint):not(script):not(style){opacity:.4}
+</style>
 <div id="ble_bar" style="position:sticky;top:0;z-index:50;display:flex;align-items:center;gap:8px;flex-wrap:wrap;
      padding:8px 12px;background:#1f2a36;color:#fff;font:600 14px -apple-system,system-ui,sans-serif">
   <span id="ble_txt">Bluetooth: not connected</span>
