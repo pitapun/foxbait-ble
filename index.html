@@ -740,6 +740,28 @@ body.stale > *:not(#ble_bar):not(#ble_hint):not(script):not(style){opacity:.4}
     <button id="btn_cfg" style="padding:6px 12px">Show</button>
   </div>
   <div id="cfgbox" style="display:none;margin-top:8px"></div>
+  <!--
+    Save / Load / Reset (Pita, 2026-11-09: boards had drifted apart, one door
+    open long, another short).  class="svc": all three change or read every
+    setting, so they go with the PIN like cfg_set.  A save lives in THIS
+    page's storage on this phone -- not a file, because a download from a
+    Bluetooth browser on an iPhone may not land anywhere -- so the Bluetooth
+    page and the board's own Wi-Fi page keep separate lists.
+  -->
+  <div class="svc" id="cfg_tools" style="display:none">
+    <div class="btns" style="margin-top:8px">
+      <button id="btn_cfg_save" type="button">Save to this phone</button>
+      <button id="btn_cfg_load" type="button">Load</button>
+      <button id="btn_cfg_reset" data-a="cfg_reset" class="warn"
+              data-confirm="Put every setting back to its default? The machine type and the PIN are kept. Door and arm positions set on this board go back to the defaults too, so Save first if you may want them back.">Reset</button>
+    </div>
+    <div id="save_row" style="display:none;margin-top:8px;gap:6px;align-items:center">
+      <input id="save_name" maxlength="40" placeholder="name for this set"
+             style="flex:1;min-width:0;font:inherit;padding:8px;border:1px solid var(--line);border-radius:7px">
+      <button id="btn_save_go" type="button">Save</button>
+    </div>
+    <div id="saves" style="display:none;margin-top:8px"></div>
+  </div>
 </div>
 
 
@@ -835,7 +857,9 @@ function setIris(openFrac, known){
   $("seams").style.opacity = known ? 1 : 0.5;
 }
 
+var lastState = null;
 function render(s){
+  lastState = s;
   var a = s.app || {};
   var b = s.batt || {};
   var n = s.net || {};
@@ -1202,7 +1226,12 @@ function runAction(btn){
   if (d !== null) url += "&d=" + encodeURIComponent(d);
   fetch(url, {cache:"no-store"})
     .then(function(r){ return r.json(); })
-    .then(function(j){ say((j.ok ? "\u2713 " : "\u2717 ") + (j.msg || "")); })
+    .then(function(j){
+      say((j.ok ? "\u2713 " : "\u2717 ") + (j.msg || ""));
+      /* Reset rewrote every row; an open list would show the old values. */
+      if (j.ok && btn.getAttribute("data-a") === "cfg_reset" && $("cfgbox").style.display !== "none")
+        loadCfg();
+    })
     .catch(function(){ say("\u2717 the board did not answer"); })
     .then(function(){
       busy = false;
@@ -1308,6 +1337,177 @@ $("btn_unlock").addEventListener("click", function(){
 $("pin_in").addEventListener("keydown", function(e){
   if (e.key === "Enter") $("btn_unlock").click();
 });
+
+/* ---- Save / Load the settings, kept on this phone ----
+   A save is every value /api/cfg lists except service_pin: a PIN does not
+   belong in a list anybody holding the phone can read, and Load must not lock
+   a board by surprise.  The machine type is not a cfg field, so it is never in
+   a save either.  Load sends cfg_set only for fields THIS board lists and whose
+   value differs, one at a time (Bluetooth carries one request at a time), and
+   says what it changed, what was already the same, what this machine does not
+   have, and what the board refused. */
+var SAVES_KEY = "foxbait_cfg_saves";
+var SKIP_ON_SAVE = {service_pin: 1};
+
+function savesRead(){
+  try { return JSON.parse(localStorage.getItem(SAVES_KEY) || "[]") || []; }
+  catch (e) { return []; }
+}
+function savesWrite(list){
+  try { localStorage.setItem(SAVES_KEY, JSON.stringify(list)); return true; }
+  catch (e) { say("✗ this browser will not keep anything (private mode?)"); return false; }
+}
+function boardLabel(){
+  var s = lastState || {}, a = s.app || {}, L = a.link || {};
+  return L.name || s.mac || "board";
+}
+function getCfg(){
+  return fetch("/api/cfg", {cache:"no-store"}).then(function(r){ return r.json(); })
+    .then(function(d){
+      if (d.locked || !d.fields || !d.fields.length) throw new Error("locked");
+      return d.fields;
+    });
+}
+function stamp(){
+  var d = new Date(), p = function(n){ return (n < 10 ? "0" : "") + n; };
+  return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate())
+       + " " + p(d.getHours()) + ":" + p(d.getMinutes());
+}
+
+$("btn_cfg_save").addEventListener("click", function(){
+  var row = $("save_row");
+  $("saves").style.display = "none";
+  if (row.style.display !== "none") { row.style.display = "none"; return; }
+  row.style.display = "flex";
+  $("save_name").value = boardLabel() + " " + stamp().slice(0, 10);
+  $("save_name").focus();
+});
+
+function saveNow(name){
+  say("reading the settings …");
+  getCfg().then(function(fields){
+    var values = {};
+    fields.forEach(function(f){ if (!SKIP_ON_SAVE[f.n]) values[f.n] = f.v; });
+    var s = lastState || {}, a = s.app || {};
+    var list = savesRead().filter(function(x){ return x.name !== name; });
+    list.unshift({name: name, saved: stamp(), board: boardLabel(),
+                  machine: a.machine || "", fw: s.fw || "", values: values});
+    if (savesWrite(list)) {
+      $("save_row").style.display = "none";
+      say("✓ saved “" + name + "” on this phone (" + Object.keys(values).length + " settings)");
+    }
+  }).catch(function(e){
+    say(e && e.message === "locked" ? "✗ the board is locked: enter the PIN first"
+                                    : "✗ could not read the settings");
+  });
+}
+$("btn_save_go").addEventListener("click", function(){
+  var name = ($("save_name").value || "").trim();
+  if (!name) { say("✗ give it a name first"); return; }
+  if (savesRead().some(function(x){ return x.name === name; }))
+    ask("A save called “" + name + "” is already on this phone. Replace it?",
+        function(){ saveNow(name); });
+  else saveNow(name);
+});
+$("save_name").addEventListener("keydown", function(e){
+  if (e.key === "Enter") $("btn_save_go").click();
+});
+
+function showSaves(){
+  var box = $("saves"), list = savesRead();
+  box.innerHTML = "";
+  if (!list.length) {
+    box.textContent = "Nothing saved on this phone yet.";
+    return;
+  }
+  list.forEach(function(x){
+    var row = document.createElement("div");
+    row.className = "saverow";
+    row.style.cssText = "display:flex;align-items:center;gap:6px;padding:5px 0;border-top:1px solid var(--line)";
+    var lab = document.createElement("div");
+    lab.style.cssText = "flex:1;min-width:0";
+    var t = document.createElement("div");
+    t.style.cssText = "font-size:13px;font-weight:600;word-break:break-word";
+    t.textContent = x.name;
+    var sub = document.createElement("div");
+    sub.style.cssText = "font-size:11px;color:var(--dim)";
+    sub.textContent = [x.board, x.machine, x.saved].filter(Boolean).join(" · ");
+    lab.appendChild(t); lab.appendChild(sub);
+    var ld = document.createElement("button");
+    ld.type = "button"; ld.className = "warn save_load"; ld.textContent = "Load";
+    ld.style.cssText = "padding:8px 12px";
+    ld.addEventListener("click", function(){ askLoad(x); });
+    var del = document.createElement("button");
+    del.type = "button"; del.className = "save_del"; del.textContent = "Delete";
+    del.style.cssText = "padding:8px 12px";
+    del.addEventListener("click", function(){
+      ask("Delete “" + x.name + "” from this phone?", function(){
+        if (savesWrite(savesRead().filter(function(y){ return y.name !== x.name; }))) {
+          say("✓ deleted “" + x.name + "”"); showSaves();
+        }
+      });
+    });
+    row.appendChild(lab); row.appendChild(ld); row.appendChild(del);
+    box.appendChild(row);
+  });
+}
+$("btn_cfg_load").addEventListener("click", function(){
+  var box = $("saves");
+  $("save_row").style.display = "none";
+  if (box.style.display !== "none") { box.style.display = "none"; return; }
+  box.style.display = "block";
+  showSaves();
+});
+
+function askLoad(x){
+  var a = (lastState || {}).app || {};
+  var other = x.machine && a.machine && x.machine !== a.machine;
+  ask("Load “" + x.name + "” onto this board?"
+      + (other ? " It was saved on a " + x.machine + " machine and this is a " + a.machine
+                 + ", so only the settings both have are copied." : "")
+      + " The machine type and the PIN are not touched.",
+      function(){ loadSave(x); });
+}
+
+function loadSave(x){
+  if (busy) return;
+  busy = true;
+  say("loading “" + x.name + "” …");
+  var changed = [], same = 0, refused = [];
+  getCfg().then(function(fields){
+    var here = {}, todo = [];
+    fields.forEach(function(f){ here[f.n] = f; });
+    Object.keys(x.values).forEach(function(n){
+      if (SKIP_ON_SAVE[n] || !here[n]) return;
+      if (Number(here[n].v) === Number(x.values[n])) same++;
+      else todo.push(n);
+    });
+    var missing = Object.keys(x.values).filter(function(n){ return !SKIP_ON_SAVE[n] && !here[n]; }).length;
+    var step = Promise.resolve();
+    todo.forEach(function(n){
+      step = step.then(function(){
+        say("loading “" + x.name + "”: " + n + " …");
+        return fetch("/api/do?a=cfg_set&n=" + encodeURIComponent(n) + "&v=" + encodeURIComponent(x.values[n]),
+                     {cache:"no-store"})
+          .then(function(r){ return r.json(); })
+          .then(function(j){ if (j.ok) changed.push(n); else refused.push(n + " (" + (j.msg || "refused") + ")"); })
+          .catch(function(){ refused.push(n + " (no answer)"); });
+      });
+    });
+    return step.then(function(){
+      say((refused.length ? "✗ " : "✓ ") + "loaded “" + x.name + "”: "
+          + changed.length + " changed, " + same + " already the same"
+          + (missing ? ", " + missing + " not on this machine" : "")
+          + (refused.length ? ", refused: " + refused.join(", ") : ""));
+    });
+  }).catch(function(e){
+    say(e && e.message === "locked" ? "✗ the board is locked: enter the PIN first"
+                                    : "✗ could not read the settings");
+  }).then(function(){
+    busy = false;
+    if ($("cfgbox").style.display !== "none") loadCfg();
+  });
+}
 
 $("btn_cfg").addEventListener("click", function(){
   var box = $("cfgbox"), open = box.style.display !== "none";
