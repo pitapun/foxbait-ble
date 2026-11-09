@@ -66,6 +66,7 @@ svg{width:100%;height:auto;display:block}
            border-radius:9px;padding:10px 12px;margin-bottom:10px;font-size:14px}
 #clkbanner b{display:block;font-size:17px;margin-bottom:3px}
 #clkbanner button{margin-top:8px;width:100%}
+.fwline{font-size:12px;color:var(--dim);margin:-4px 2px 8px}
 .foot{font-size:11px;color:var(--dim);text-align:center;padding:4px 0 10px}
 @keyframes spin{to{transform:translateX(-30px)}}
 #augerspin{animation:spin 1.1s linear infinite;animation-play-state:paused}
@@ -201,6 +202,7 @@ body.stale > *:not(#ble_bar):not(#ble_hint):not(script):not(style){opacity:.4}
   <span class="sp"></span>
   <span id="p_link" class="pill off">connecting</span>
 </div>
+<div class="fwline" id="v_fw">&nbsp;</div>
 
 <div id="clkbanner">
   <b id="clkb_t">CLOCK NOT SET</b>
@@ -455,6 +457,9 @@ body.stale > *:not(#ble_bar):not(#ble_hint):not(script):not(style){opacity:.4}
   -->
   <div class="btns svc" style="margin-top:8px">
     <button id="btn_sleep" data-a="sleep_on">Turn deep sleep ON</button>
+    <!-- render() rewrites data-a, the same one-button shape as above.  Ends by
+         itself and is never saved, unlike the switch beside it. -->
+    <button id="btn_hold" data-a="hold_on" style="display:none">Test hold</button>
   </div>
   <!--
     The TEST mode's counts, and why the chip last restarted.  Always shown once
@@ -529,8 +534,10 @@ body.stale > *:not(#ble_bar):not(#ble_hint):not(script):not(style){opacity:.4}
 
   <div class="grp">bait</div>
   <div class="btns">
-    <button id="btn_dispense" data-a="dispense" class="warn"
-            data-confirm="Run one dispense cycle?">Dispense</button>
+    <!-- Always forced (Pita, 2026-11-04): an EMPTY latch must not stop a test,
+         and zeroing the counter was the only way past it from this page. -->
+    <button id="btn_dispense" data-a="dispense_force" class="warn"
+            data-confirm="Run one dispense cycle? This goes ahead even if the hopper is flagged empty.">Dispense</button>
     <button data-a="slot">Read slot</button>
     <button data-a="count_reset" class="warn"
             data-confirm="Zero the bait counter?">Zero counter</button>
@@ -708,6 +715,25 @@ body.stale > *:not(#ble_bar):not(#ble_hint):not(script):not(style){opacity:.4}
   </div>
 </div>
 
+<!--
+  The Production check (Pita, 2026-11-04).  The board runs it; this only starts
+  it and shows the steps.  Hidden on firmware that does not send a.prod.
+-->
+<div class="card" id="prod_card" style="display:none">
+  <b style="font-size:11px;font-weight:600;color:var(--dim);text-transform:uppercase;letter-spacing:.5px">production</b>
+  <div id="prod_steps" style="font-size:13px;margin:6px 0"></div>
+  <div id="v_prod" style="font-size:12px;color:var(--dim);margin-bottom:8px"></div>
+  <div class="btns">
+    <button id="btn_prod" data-a="production" class="warn"
+            data-confirm="Run the Production check? The door and the dispenser will move.">Production</button>
+    <button id="btn_prod_auto" data-a="production_auto" class="warn" style="display:none"
+            data-confirm="Finish in AUTO? This sets the FIELD settings, turns deep sleep on, and clears the bait counter and the test records.">AUTO</button>
+    <button id="btn_prod_link" data-a="production_link" class="warn" style="display:none"
+            data-confirm="Finish in LINK? This sets the FIELD settings, turns deep sleep on, and clears the bait counter and the test records.">LINK</button>
+    <button id="btn_prod_cancel" data-a="production_cancel" style="display:none">Cancel</button>
+  </div>
+</div>
+
 <div class="card" id="cfg_card">
   <div style="display:flex;align-items:center;gap:8px">
     <b style="font-size:11px;font-weight:600;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;flex:1">settings</b>
@@ -813,6 +839,14 @@ function render(s){
   var a = s.app || {};
   var b = s.batt || {};
   var n = s.net || {};
+
+  /* The build's name, the same string the desktop flasher lists (ota.c).  A
+     build made without tools/fwbuild.sh carries git describe instead, so its
+     hash goes beside it.  Firmware before 2026-11-09 sends no name at all. */
+  $("v_fw").textContent = !s.fw
+      ? "firmware: older than this page (it sends no version)"
+      : "firmware " + s.fw
+        + (/^\d{8}-\d{4}_/.test(s.fw) || !s.fw_sha ? "" : " (" + s.fw_sha + ")");
 
   /* ---- headline ---- */
   var st = (a.status || "?").toUpperCase();
@@ -1031,7 +1065,12 @@ function render(s){
        : a.sleep_kind === "light"
          ? ("light sleep" + (a.light_armed ? "" : " (not armed)"))
          : ("sleep in " + a.next_sleep_s + " s"));
+  if (a.hold_s) pill($("p_sleep"), "warn", "test hold " + Math.ceil(a.hold_s / 60) + " min");
   $("p_sleep").title = a.sleep_why || "";
+  var hb = $("btn_hold");
+  hb.style.display = (a.hold_s === undefined || a.hold_s === null) ? "none" : "";
+  hb.setAttribute("data-a", a.hold_s ? "hold_off" : "hold_on");
+  hb.textContent = a.hold_s ? "End test hold" : "Test hold";
 
   /* The button follows a.sleep_enabled rather than tracking its own idea of
      the state: the console, the settings row and another phone can all change
@@ -1069,6 +1108,7 @@ function render(s){
            + "dispensed " + t.dispenses + " (" + t.dispense_faults + " failed), "
            + t.restarts + " restarts \u00b7 ") : "")
     + "last restart: " + (a.reset_reason || "?");
+  renderProd(a.prod);
   $("pcb").setAttribute("fill", "#2f6b3f");
 
   $("v_meta").textContent =
@@ -1178,6 +1218,38 @@ document.querySelectorAll("button[data-a]").forEach(function(btn){
     else   runAction(btn);
   });
 });
+
+/* ---- the Production check ----
+   The steps are in the board's order; marks has one letter for each. */
+var PROD_STEPS = ["Machine set up", "Clock", "ToF sensor", "Battery",
+                  "Door opens", "Door shuts", "Dispense"];
+var PROD_MARK  = {p: "\u2713", f: "\u2717", r: "\u2026", "-": "\u00b7"};
+var PROD_NOTE  = {
+  idle:      "Checks everything, then sets the machine up for the field.",
+  running:   "Checking. The door and the dispenser will move.",
+  pick_mode: "All passed. Pick the mode to finish.",
+  done:      "Done. The field settings are on."
+};
+function renderProd(p){
+  $("prod_card").style.display = p ? "" : "none";
+  if (!p) return;
+  var box = $("prod_steps");
+  box.textContent = "";
+  PROD_STEPS.forEach(function(name, i){
+    var row = document.createElement("div");
+    row.textContent = (PROD_MARK[p.marks.charAt(i)] || "\u00b7") + " " + name;
+    box.appendChild(row);
+  });
+  $("v_prod").textContent = p.state === "failed"
+      ? "Stopped: " + p.why + ". No setting was changed."
+      : PROD_NOTE[p.state];
+  var picking = p.state === "pick_mode";
+  var busy = p.state === "running" || picking;
+  $("btn_prod").style.display        = busy ? "none" : "";
+  $("btn_prod_auto").style.display   = picking ? "" : "none";
+  $("btn_prod_link").style.display   = picking ? "" : "none";
+  $("btn_prod_cancel").style.display = busy ? "" : "none";
+}
 
 /* ---- settings ----
    Rows come from the board, including lo/hi, so the input's own validation is
